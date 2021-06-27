@@ -23,7 +23,7 @@ from typing import List, Optional, Tuple
 
 from ...tokenization_utils import PreTrainedTokenizer
 from ...utils import logging
-
+import collections
 
 logger = logging.get_logger(__name__)
 
@@ -47,6 +47,16 @@ PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
     "vinai/phobert-base": 256,
     "vinai/phobert-large": 256,
 }
+
+# def load_vocab(vocab_file):
+#     """Loads a vocabulary file into a dictionary."""
+#     vocab = collections.OrderedDict()
+#     with open(vocab_file, "r", encoding="utf-8") as reader:
+#         tokens = reader.readlines()
+#     for index, token in enumerate(tokens):
+#         token = token.rstrip("\n")
+#         vocab[token] = index
+#     return vocab
 
 
 def get_pairs(word):
@@ -139,15 +149,17 @@ class PhobertTokenizer(PreTrainedTokenizer):
         self.vocab_file = vocab_file
         self.merges_file = merges_file
 
-        self.encoder = {}
-        self.encoder[self.bos_token] = 0
-        self.encoder[self.pad_token] = 1
-        self.encoder[self.eos_token] = 2
-        self.encoder[self.unk_token] = 3
+        # self.vocab = {}
+        self.vocab = collections.OrderedDict()
+        self.vocab[self.bos_token] = 0
+        self.vocab[self.pad_token] = 1
+        self.vocab[self.eos_token] = 2
+        self.vocab[self.unk_token] = 3
 
         self.add_from_file(vocab_file)
 
-        self.decoder = {v: k for k, v in self.encoder.items()}
+        # self.ids_to_tokens = {v: k for k, v in self.vocab.items()}
+        self.ids_to_tokens = collections.OrderedDict([(ids, tok) for tok, ids in self.vocab.items()])
 
         with open(merges_file, encoding="utf-8") as merges_handle:
             merges = merges_handle.read().split("\n")[:-1]
@@ -235,10 +247,10 @@ class PhobertTokenizer(PreTrainedTokenizer):
 
     @property
     def vocab_size(self):
-        return len(self.encoder)
+        return len(self.vocab)
 
     def get_vocab(self):
-        return dict(self.encoder, **self.added_tokens_encoder)
+        return dict(self.vocab, **self.added_tokens_encoder)
 
     def bpe(self, token):
         if token in self.cache:
@@ -296,11 +308,11 @@ class PhobertTokenizer(PreTrainedTokenizer):
 
     def _convert_token_to_id(self, token):
         """Converts a token (str) in an id using the vocab."""
-        return self.encoder.get(token, self.encoder.get(self.unk_token))
+        return self.vocab.get(token, self.vocab.get(self.unk_token))
 
     def _convert_id_to_token(self, index):
         """Converts an index (integer) in a token (str) using the vocab."""
-        return self.decoder.get(index, self.unk_token)
+        return self.ids_to_tokens.get(index, self.unk_token)
 
     def convert_tokens_to_string(self, tokens):
         """Converts a sequence of tokens (string) in a single string."""
@@ -353,4 +365,4 @@ class PhobertTokenizer(PreTrainedTokenizer):
             if idx == -1:
                 raise ValueError("Incorrect dictionary format, expected '<token> <cnt>'")
             word = line[:idx]
-            self.encoder[word] = len(self.encoder)
+            self.vocab[word] = len(self.vocab)
