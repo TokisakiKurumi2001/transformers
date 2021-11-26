@@ -13,11 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import random
 import unittest
 
-from transformers import is_torch_available
+from transformers import XLNetConfig, is_torch_available
 from transformers.testing_utils import require_torch, slow, torch_device
 
 from .test_configuration_common import ConfigTester
@@ -29,7 +28,6 @@ if is_torch_available():
     import torch
 
     from transformers import (
-        XLNetConfig,
         XLNetForMultipleChoice,
         XLNetForQuestionAnswering,
         XLNetForQuestionAnsweringSimple,
@@ -131,7 +129,25 @@ class XLNetModelTester:
             is_impossible_labels = ids_tensor([self.batch_size], 2).float()
             token_labels = ids_tensor([self.batch_size, self.seq_length], self.type_vocab_size)
 
-        config = XLNetConfig(
+        config = self.get_config()
+
+        return (
+            config,
+            input_ids_1,
+            input_ids_2,
+            input_ids_q,
+            perm_mask,
+            input_mask,
+            target_mapping,
+            segment_ids,
+            lm_labels,
+            sequence_labels,
+            is_impossible_labels,
+            token_labels,
+        )
+
+    def get_config(self):
+        return XLNetConfig(
             vocab_size=self.vocab_size,
             d_model=self.hidden_size,
             n_head=self.num_attention_heads,
@@ -148,21 +164,6 @@ class XLNetModelTester:
             bos_token_id=self.bos_token_id,
             pad_token_id=self.pad_token_id,
             eos_token_id=self.eos_token_id,
-        )
-
-        return (
-            config,
-            input_ids_1,
-            input_ids_2,
-            input_ids_q,
-            perm_mask,
-            input_mask,
-            target_mapping,
-            segment_ids,
-            lm_labels,
-            sequence_labels,
-            is_impossible_labels,
-            token_labels,
         )
 
     def set_seed(self):
@@ -526,7 +527,6 @@ class XLNetModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase)
         (XLNetLMHeadModel,) if is_torch_available() else ()
     )  # TODO (PVP): Check other models whether language generation is also applicable
     test_pruning = False
-    test_sequence_classification_problem_types = True
 
     # XLNet has 2 QA models -> need to manually set the correct labels for one of them here
     def _prepare_for_class(self, inputs_dict, model_class, return_labels=False):

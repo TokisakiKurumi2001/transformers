@@ -42,6 +42,7 @@ from flax import jax_utils, traverse_util
 from flax.jax_utils import unreplicate
 from flax.training import train_state
 from flax.training.common_utils import get_metrics, onehot, shard, shard_prng_key
+from huggingface_hub import Repository
 from transformers import (
     CONFIG_MAPPING,
     FLAX_MODEL_FOR_SEQ_TO_SEQ_CAUSAL_LM_MAPPING,
@@ -52,7 +53,7 @@ from transformers import (
     TrainingArguments,
     is_tensorboard_available,
 )
-from transformers.file_utils import is_offline_mode
+from transformers.file_utils import get_full_repo_name, is_offline_mode
 
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,10 @@ class DataTrainingArguments:
     validation_file: Optional[str] = field(
         default=None,
         metadata={"help": "An optional input evaluation data file to evaluate the perplexity on (a text file)."},
+    )
+    test_file: Optional[str] = field(
+        default=None,
+        metadata={"help": "An optional input predict data file to do prediction on (a text file)."},
     )
     max_source_length: Optional[int] = field(
         default=1024,
@@ -328,6 +333,16 @@ def main():
 
     # Set the verbosity to info of the Transformers logger (on main process only):
     logger.info(f"Training/evaluation parameters {training_args}")
+
+    # Handle the repository creation
+    if training_args.push_to_hub:
+        if training_args.hub_model_id is None:
+            repo_name = get_full_repo_name(
+                Path(training_args.output_dir).absolute().name, token=training_args.hub_token
+            )
+        else:
+            repo_name = training_args.hub_model_id
+        repo = Repository(training_args.output_dir, clone_from=repo_name)
 
     # Get the datasets: you can either provide your own CSV/JSON training and evaluation files (see below)
     # or just provide the name of one of the public datasets available on the hub at https://huggingface.co/datasets/
@@ -542,7 +557,7 @@ def main():
         try:
             from flax.metrics.tensorboard import SummaryWriter
 
-            summary_writer = SummaryWriter(log_dir=Path(training_args.output_dir).joinpath("logs").as_posix())
+            summary_writer = SummaryWriter(log_dir=Path(training_args.output_dir))
         except ImportError as ie:
             has_tensorboard = False
             logger.warning(
@@ -578,9 +593,15 @@ def main():
     # to bias and LayerNorm scale parameters. decay_mask_fn returns a
     # mask boolean with the same structure as the parameters.
     # The mask is True for parameters that should be decayed.
+    # Note that this mask is specifically adapted for FlaxBart.
+    # For FlaxT5, one should correct the layer norm parameter naming
+    # accordingly - see `run_t5_mlm_flax.py` e.g.
     def decay_mask_fn(params):
         flat_params = traverse_util.flatten_dict(params)
-        flat_mask = {path: (path[-1] != "bias" and path[-2:] != ("LayerNorm", "scale")) for path in flat_params}
+        layer_norm_params = [
+            (name, "scale") for name in ["self_attn_layer_norm", "layernorm_embedding", "final_layer_norm"]
+        ]
+        flat_mask = {path: (path[-1] != "bias" and path[-2:] not in layer_norm_params) for path in flat_params}
         return traverse_util.unflatten_dict(flat_mask)
 
     # create adam optimizer
@@ -748,6 +769,14 @@ def main():
             cur_step = epoch * (len(train_dataset) // train_batch_size)
             write_metric(summary_writer, train_metrics, eval_metrics, train_time, cur_step)
 
+        # save checkpoint after each epoch and push checkpoint to the hub
+        if jax.process_index() == 0:
+            params = jax.device_get(jax.tree_map(lambda x: x[0], state.params))
+            model.save_pretrained(training_args.output_dir, params=params)
+            tokenizer.save_pretrained(training_args.output_dir)
+            if training_args.push_to_hub:
+                repo.push_to_hub(commit_message=f"Saving weights and logs of epoch {epoch}", blocking=False)
+
     # ======================== Prediction loop ==============================
     if training_args.do_predict:
         logger.info("*** Predict ***")
@@ -786,11 +815,6 @@ def main():
         # Print metrics
         desc = f"Predict Loss: {pred_metrics['loss']} | {rouge_desc})"
         logger.info(desc)
-
-    # save last checkpoint
-    if jax.process_index() == 0:
-        params = jax.device_get(unreplicate(state.params))
-        model.save_pretrained(training_args.output_dir, params=params)
 
 
 if __name__ == "__main__":

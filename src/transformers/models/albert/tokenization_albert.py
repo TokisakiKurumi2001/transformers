@@ -142,8 +142,13 @@ class AlbertTokenizer(PreTrainedTokenizer):
         sp_model_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> None:
-        # Mask token behave like a normal word, i.e. include the space before it
-        mask_token = AddedToken(mask_token, lstrip=True, rstrip=False) if isinstance(mask_token, str) else mask_token
+        # Mask token behave like a normal word, i.e. include the space before it and
+        # is included in the raw text, there should be a match in a non-normalized sentence.
+        mask_token = (
+            AddedToken(mask_token, lstrip=True, rstrip=False, normalized=False)
+            if isinstance(mask_token, str)
+            else mask_token
+        )
 
         self.sp_model_kwargs = {} if sp_model_kwargs is None else sp_model_kwargs
 
@@ -238,8 +243,7 @@ class AlbertTokenizer(PreTrainedTokenizer):
         return self.sp_model.IdToPiece(index)
 
     def convert_tokens_to_string(self, tokens):
-        out_string = "".join(tokens).replace(SPIECE_UNDERLINE, " ").strip()
-        return out_string
+        return self.sp_model.decode(tokens)
 
     def build_inputs_with_special_tokens(
         self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None

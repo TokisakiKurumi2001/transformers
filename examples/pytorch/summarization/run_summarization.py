@@ -48,7 +48,7 @@ from transformers.utils.versions import require_version
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.9.0.dev0")
+check_min_version("4.13.0.dev0")
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/summarization/requirements.txt")
 
@@ -97,6 +97,13 @@ class ModelArguments:
         metadata={
             "help": "Will use the token generated when running `transformers-cli login` (necessary to use this script "
             "with private models)."
+        },
+    )
+    resize_position_embeddings: Optional[bool] = field(
+        default=None,
+        metadata={
+            "help": "Whether to automatically resize the position embeddings if `max_source_length` exceeds "
+            "the model's position embeddings."
         },
     )
 
@@ -366,6 +373,25 @@ def main():
     if model.config.decoder_start_token_id is None:
         raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
 
+    if (
+        hasattr(model.config, "max_position_embeddings")
+        and model.config.max_position_embeddings < data_args.max_source_length
+    ):
+        if model_args.resize_position_embeddings is None:
+            logger.warning(
+                f"Increasing the model's number of position embedding vectors from {model.config.max_position_embeddings} "
+                f"to {data_args.max_source_length}."
+            )
+            model.resize_position_embeddings(data_args.max_source_length)
+        elif model_args.resize_position_embeddings:
+            model.resize_position_embeddings(data_args.max_source_length)
+        else:
+            raise ValueError(
+                f"`--max_source_length` is set to {data_args.max_source_length}, but the model only has {model.config.max_position_embeddings}"
+                f" position encodings. Consider either reducing `--max_source_length` to {model.config.max_position_embeddings} or to automatically "
+                "resize the model's position encodings by passing `--resize_position_embeddings`."
+            )
+
     prefix = data_args.source_prefix if data_args.source_prefix is not None else ""
 
     # Preprocessing the datasets.
@@ -435,14 +461,15 @@ def main():
         train_dataset = raw_datasets["train"]
         if data_args.max_train_samples is not None:
             train_dataset = train_dataset.select(range(data_args.max_train_samples))
-        train_dataset = train_dataset.map(
-            preprocess_function,
-            batched=True,
-            num_proc=data_args.preprocessing_num_workers,
-            remove_columns=column_names,
-            load_from_cache_file=not data_args.overwrite_cache,
-            desc="Running tokenizer on train dataset",
-        )
+        with training_args.main_process_first(desc="train dataset map pre-processing"):
+            train_dataset = train_dataset.map(
+                preprocess_function,
+                batched=True,
+                num_proc=data_args.preprocessing_num_workers,
+                remove_columns=column_names,
+                load_from_cache_file=not data_args.overwrite_cache,
+                desc="Running tokenizer on train dataset",
+            )
 
     if training_args.do_eval:
         max_target_length = data_args.val_max_target_length
@@ -451,14 +478,15 @@ def main():
         eval_dataset = raw_datasets["validation"]
         if data_args.max_eval_samples is not None:
             eval_dataset = eval_dataset.select(range(data_args.max_eval_samples))
-        eval_dataset = eval_dataset.map(
-            preprocess_function,
-            batched=True,
-            num_proc=data_args.preprocessing_num_workers,
-            remove_columns=column_names,
-            load_from_cache_file=not data_args.overwrite_cache,
-            desc="Running tokenizer on validation dataset",
-        )
+        with training_args.main_process_first(desc="validation dataset map pre-processing"):
+            eval_dataset = eval_dataset.map(
+                preprocess_function,
+                batched=True,
+                num_proc=data_args.preprocessing_num_workers,
+                remove_columns=column_names,
+                load_from_cache_file=not data_args.overwrite_cache,
+                desc="Running tokenizer on validation dataset",
+            )
 
     if training_args.do_predict:
         max_target_length = data_args.val_max_target_length
@@ -467,14 +495,15 @@ def main():
         predict_dataset = raw_datasets["test"]
         if data_args.max_predict_samples is not None:
             predict_dataset = predict_dataset.select(range(data_args.max_predict_samples))
-        predict_dataset = predict_dataset.map(
-            preprocess_function,
-            batched=True,
-            num_proc=data_args.preprocessing_num_workers,
-            remove_columns=column_names,
-            load_from_cache_file=not data_args.overwrite_cache,
-            desc="Running tokenizer on prediction dataset",
-        )
+        with training_args.main_process_first(desc="prediction dataset map pre-processing"):
+            predict_dataset = predict_dataset.map(
+                preprocess_function,
+                batched=True,
+                num_proc=data_args.preprocessing_num_workers,
+                remove_columns=column_names,
+                load_from_cache_file=not data_args.overwrite_cache,
+                desc="Running tokenizer on prediction dataset",
+            )
 
     # Data collator
     label_pad_token_id = -100 if data_args.ignore_pad_token_for_loss else tokenizer.pad_token_id
@@ -553,12 +582,15 @@ def main():
 
     # Evaluation
     results = {}
+    max_length = (
+        training_args.generation_max_length
+        if training_args.generation_max_length is not None
+        else data_args.val_max_target_length
+    )
+    num_beams = data_args.num_beams if data_args.num_beams is not None else training_args.generation_num_beams
     if training_args.do_eval:
         logger.info("*** Evaluate ***")
-
-        metrics = trainer.evaluate(
-            max_length=data_args.val_max_target_length, num_beams=data_args.num_beams, metric_key_prefix="eval"
-        )
+        metrics = trainer.evaluate(max_length=max_length, num_beams=num_beams, metric_key_prefix="eval")
         max_eval_samples = data_args.max_eval_samples if data_args.max_eval_samples is not None else len(eval_dataset)
         metrics["eval_samples"] = min(max_eval_samples, len(eval_dataset))
 
@@ -569,10 +601,7 @@ def main():
         logger.info("*** Predict ***")
 
         predict_results = trainer.predict(
-            predict_dataset,
-            metric_key_prefix="predict",
-            max_length=data_args.val_max_target_length,
-            num_beams=data_args.num_beams,
+            predict_dataset, metric_key_prefix="predict", max_length=max_length, num_beams=num_beams
         )
         metrics = predict_results.metrics
         max_predict_samples = (
@@ -593,17 +622,19 @@ def main():
                 with open(output_prediction_file, "w") as writer:
                     writer.write("\n".join(predictions))
 
-    if training_args.push_to_hub:
-        kwargs = {"finetuned_from": model_args.model_name_or_path, "tasks": "summarization"}
-        if data_args.dataset_name is not None:
-            kwargs["dataset_tags"] = data_args.dataset_name
-            if data_args.dataset_config_name is not None:
-                kwargs["dataset_args"] = data_args.dataset_config_name
-                kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
-            else:
-                kwargs["dataset"] = data_args.dataset_name
+    kwargs = {"finetuned_from": model_args.model_name_or_path, "tasks": "summarization"}
+    if data_args.dataset_name is not None:
+        kwargs["dataset_tags"] = data_args.dataset_name
+        if data_args.dataset_config_name is not None:
+            kwargs["dataset_args"] = data_args.dataset_config_name
+            kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
+        else:
+            kwargs["dataset"] = data_args.dataset_name
 
+    if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
+    else:
+        trainer.create_model_card(**kwargs)
 
     return results
 

@@ -20,6 +20,7 @@ import math
 import unittest
 
 import numpy as np
+import pytest
 
 from transformers import Wav2Vec2Config, is_tf_available
 from transformers.testing_utils import require_datasets, require_soundfile, require_tf, slow
@@ -202,6 +203,14 @@ class TFWav2Vec2ModelTester:
 
         self.parent.assertFalse(tf.math.is_inf(loss))
 
+    def check_labels_out_of_vocab(self, config, input_values, *args):
+        model = TFWav2Vec2ForCTC(config)
+        input_lengths = tf.constant([input_values.shape[-1] // i for i in [4, 2, 1]])
+        max_length_labels = model.wav2vec2._get_feat_extract_output_lengths(input_lengths)
+        labels = ids_tensor((input_values.shape[0], min(max_length_labels) - 1), model.config.vocab_size + 100)
+        with pytest.raises(ValueError):
+            model(input_values, labels=labels)
+
     def prepare_config_and_inputs_for_common(self):
         config, input_values, attention_mask = self.prepare_config_and_inputs()
         inputs_dict = {"input_values": input_values, "attention_mask": attention_mask}
@@ -287,6 +296,10 @@ class TFWav2Vec2ModelTest(TFModelTesterMixin, unittest.TestCase):
     def test_ctc_loss_inference(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.check_ctc_loss(*config_and_inputs)
+
+    def test_labels_out_of_vocab(self):
+        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        self.model_tester.check_labels_out_of_vocab(*config_and_inputs)
 
     def test_train(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
@@ -402,6 +415,10 @@ class TFWav2Vec2RobustModelTest(TFModelTesterMixin, unittest.TestCase):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.check_ctc_loss(*config_and_inputs)
 
+    def test_labels_out_of_vocab(self):
+        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        self.model_tester.check_labels_out_of_vocab(*config_and_inputs)
+
     def test_train(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.check_training(*config_and_inputs)
@@ -462,21 +479,13 @@ class TFWav2Vec2ModelIntegrationTest(unittest.TestCase):
     def _load_datasamples(self, num_samples):
         from datasets import load_dataset
 
-        import soundfile as sf
+        ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+        # automatic decoding with librispeech
+        speech_samples = ds.sort("id").filter(
+            lambda x: x["id"] in [f"1272-141231-000{i}" for i in range(num_samples)]
+        )[:num_samples]["audio"]
 
-        ids = [f"1272-141231-000{i}" for i in range(num_samples)]
-
-        # map files to raw
-        def map_to_array(batch):
-            speech, _ = sf.read(batch["file"])
-            batch["speech"] = speech
-            return batch
-
-        ds = load_dataset("patrickvonplaten/librispeech_asr_dummy", "clean", split="validation")
-
-        ds = ds.filter(lambda x: x["id"] in ids).sort("id").map(map_to_array)
-
-        return ds["speech"][:num_samples]
+        return [x["array"] for x in speech_samples]
 
     def test_inference_ctc_normal(self):
         model = TFWav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base-960h")
@@ -499,9 +508,7 @@ class TFWav2Vec2ModelIntegrationTest(unittest.TestCase):
 
         input_speech = self._load_datasamples(2)
 
-        input_values = processor(
-            input_speech, return_tensors="tf", padding=True, truncation=True, sampling_rate=16000
-        ).input_values
+        input_values = processor(input_speech, return_tensors="tf", padding=True, sampling_rate=16000).input_values
 
         logits = model(input_values).logits
 
@@ -520,14 +527,14 @@ class TFWav2Vec2ModelIntegrationTest(unittest.TestCase):
 
         input_speech = self._load_datasamples(4)
 
-        inputs = processor(input_speech, return_tensors="tf", padding=True, truncation=True)
+        inputs = processor(input_speech, return_tensors="tf", padding=True, sampling_rate=16000)
 
         input_values = inputs.input_values
         attention_mask = inputs.attention_mask
 
         logits = model(input_values, attention_mask=attention_mask).logits
 
-        predicted_ids = tf.argmax(logits, dim=-1)
+        predicted_ids = tf.argmax(logits, axis=-1)
         predicted_trans = processor.batch_decode(predicted_ids)
 
         EXPECTED_TRANSCRIPTIONS = [

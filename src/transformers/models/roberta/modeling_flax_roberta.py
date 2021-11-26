@@ -139,19 +139,16 @@ class FlaxRobertaEmbeddings(nn.Module):
             self.config.vocab_size,
             self.config.hidden_size,
             embedding_init=jax.nn.initializers.normal(stddev=self.config.initializer_range),
-            dtype=self.dtype,
         )
         self.position_embeddings = nn.Embed(
             self.config.max_position_embeddings,
             self.config.hidden_size,
             embedding_init=jax.nn.initializers.normal(stddev=self.config.initializer_range),
-            dtype=self.dtype,
         )
         self.token_type_embeddings = nn.Embed(
             self.config.type_vocab_size,
             self.config.hidden_size,
             embedding_init=jax.nn.initializers.normal(stddev=self.config.initializer_range),
-            dtype=self.dtype,
         )
         self.LayerNorm = nn.LayerNorm(epsilon=self.config.layer_norm_eps, dtype=self.dtype)
         self.dropout = nn.Dropout(rate=self.config.hidden_dropout_prob)
@@ -186,17 +183,17 @@ class FlaxRobertaSelfAttention(nn.Module):
         self.query = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
         self.key = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
         self.value = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
 
     def __call__(self, hidden_states, attention_mask, deterministic=True, output_attentions: bool = False):
@@ -255,7 +252,7 @@ class FlaxRobertaSelfOutput(nn.Module):
     def setup(self):
         self.dense = nn.Dense(
             self.config.hidden_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
         self.LayerNorm = nn.LayerNorm(epsilon=self.config.layer_norm_eps, dtype=self.dtype)
@@ -303,7 +300,7 @@ class FlaxRobertaIntermediate(nn.Module):
     def setup(self):
         self.dense = nn.Dense(
             self.config.intermediate_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
         self.activation = ACT2FN[self.config.hidden_act]
@@ -322,7 +319,7 @@ class FlaxRobertaOutput(nn.Module):
     def setup(self):
         self.dense = nn.Dense(
             self.config.hidden_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
         self.dropout = nn.Dropout(rate=self.config.hidden_dropout_prob)
@@ -444,7 +441,7 @@ class FlaxRobertaPooler(nn.Module):
     def setup(self):
         self.dense = nn.Dense(
             self.config.hidden_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
 
@@ -463,14 +460,14 @@ class FlaxRobertaLMHead(nn.Module):
         self.dense = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
         self.layer_norm = nn.LayerNorm(epsilon=self.config.layer_norm_eps, dtype=self.dtype)
         self.decoder = nn.Dense(
             self.config.vocab_size,
             dtype=self.dtype,
             use_bias=False,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
         self.bias = self.param("bias", self.bias_init, (self.config.vocab_size,))
 
@@ -484,7 +481,8 @@ class FlaxRobertaLMHead(nn.Module):
         else:
             hidden_states = self.decoder(hidden_states)
 
-        hidden_states += self.bias
+        bias = jnp.asarray(self.bias, self.dtype)
+        hidden_states += bias
         return hidden_states
 
 
@@ -496,13 +494,18 @@ class FlaxRobertaClassificationHead(nn.Module):
         self.dense = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
-        self.dropout = nn.Dropout(rate=self.config.hidden_dropout_prob)
+        classifier_dropout = (
+            self.config.classifier_dropout
+            if self.config.classifier_dropout is not None
+            else self.config.hidden_dropout_prob
+        )
+        self.dropout = nn.Dropout(rate=classifier_dropout)
         self.out_proj = nn.Dense(
             self.config.num_labels,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
 
     def __call__(self, hidden_states, deterministic=True):
@@ -615,13 +618,21 @@ class FlaxRobertaModule(nn.Module):
         self,
         input_ids,
         attention_mask,
-        token_type_ids,
-        position_ids,
+        token_type_ids: Optional[np.ndarray] = None,
+        position_ids: Optional[np.ndarray] = None,
         deterministic: bool = True,
         output_attentions: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
+        # make sure `token_type_ids` is correctly initialized when not passed
+        if token_type_ids is None:
+            token_type_ids = jnp.zeros_like(input_ids)
+
+        # make sure `position_ids` is correctly initialized when not passed
+        if position_ids is None:
+            position_ids = jnp.broadcast_to(jnp.arange(jnp.atleast_2d(input_ids).shape[-1]), input_ids.shape)
+
         hidden_states = self.embeddings(
             input_ids, token_type_ids, position_ids, attention_mask, deterministic=deterministic
         )
@@ -877,7 +888,12 @@ class FlaxRobertaForTokenClassificationModule(nn.Module):
 
     def setup(self):
         self.roberta = FlaxRobertaModule(config=self.config, dtype=self.dtype, add_pooling_layer=False)
-        self.dropout = nn.Dropout(rate=self.config.hidden_dropout_prob)
+        classifier_dropout = (
+            self.config.classifier_dropout
+            if self.config.classifier_dropout is not None
+            else self.config.hidden_dropout_prob
+        )
+        self.dropout = nn.Dropout(rate=classifier_dropout)
         self.classifier = nn.Dense(self.config.num_labels, dtype=self.dtype)
 
     def __call__(

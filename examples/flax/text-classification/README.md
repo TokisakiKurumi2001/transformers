@@ -21,7 +21,9 @@ limitations under the License.
 Based on the script [`run_flax_glue.py`](https://github.com/huggingface/transformers/blob/master/examples/flax/text-classification/run_flax_glue.py).
 
 Fine-tuning the library models for sequence classification on the GLUE benchmark: [General Language Understanding
-Evaluation](https://gluebenchmark.com/). This script can fine-tune any of the models on the [hub](https://huggingface.co/models).
+Evaluation](https://gluebenchmark.com/). This script can fine-tune any of the models on the [hub](https://huggingface.co/models)  and can also be used for a 
+dataset hosted on our [hub](https://huggingface.co/datasets) or your own data in a csv or a JSON file (the script might need some tweaks in that case, 
+refer to the comments inside for help).
 
 GLUE is made up of a total of 9 different tasks. Here is how to run the script on one of them:
 
@@ -30,23 +32,26 @@ export TASK_NAME=mrpc
 
 python run_flax_glue.py \
   --model_name_or_path bert-base-cased \
-  --task_name $TASK_NAME \
+  --task_name ${TASK_NAME} \
   --max_length 128 \
   --learning_rate 2e-5 \
   --num_train_epochs 3 \
   --per_device_train_batch_size 4 \
-  --output_dir /tmp/$TASK_NAME/
+  --output_dir ./$TASK_NAME/ \
+  --push_to_hub
 ```
 
 where task name can be one of cola, mnli, mnli-mm, mrpc, qnli, qqp, rte, sst2, stsb, wnli.
 
 Using the command above, the script will train for 3 epochs and run eval after each epoch. 
-Metrics and hyperparameters are stored in Tensorflow event files in `---output_dir`.
+Metrics and hyperparameters are stored in Tensorflow event files in `--output_dir`.
 You can see the results by running `tensorboard` in that directory:
 
 ```bash
 $ tensorboard --logdir .
 ```
+
+or directly on the hub under *Training metrics*.
 
 ### Accuracy Evaluation
 
@@ -63,7 +68,7 @@ In the Tensorboard results linked below, the random seed of each model is equal 
 
 | Task  | Metric                       | Acc (best run) | Acc (avg/5runs) | Stdev     | Metrics                                                                  |
 |-------|------------------------------|----------------|-----------------|-----------|--------------------------------------------------------------------------|
-| CoLA  | Matthew's corr               | 60.57          | 59.04           | 1.06      | [tfhub.dev](https://tensorboard.dev/experiment/lfr2adVpRtmLDALKrElkzg/)  |
+| CoLA  | Matthews corr                | 60.57          | 59.04           | 1.06      | [tfhub.dev](https://tensorboard.dev/experiment/lfr2adVpRtmLDALKrElkzg/)  |
 | SST-2 | Accuracy                     | 92.66          | 92.23           | 0.57      | [tfhub.dev](https://tensorboard.dev/experiment/jYvfv2trRHKMjoWnXVwrZA/)  |
 | MRPC  | F1/Accuracy                  | 89.90/85.78    | 88.97/84.36     | 0.72/1.09 | [tfhub.dev](https://tensorboard.dev/experiment/bo3W3DEoRw2Q7YXjWrJkfg/)  |
 | STS-B | Pearson/Spearman corr.       | 89.04/88.70    | 88.94/88.63     | 0.07/0.07 | [tfhub.dev](https://tensorboard.dev/experiment/fxVwbLD7QpKhbot0r9rn2w/)  |
@@ -95,14 +100,8 @@ overall training time below. For comparison we ran Pytorch's [run_glue.py](https
 | WNLI  |  1m 11s   |     48s    | 39s        | 36s             |
 |-------|
 | **TOTAL** | 1h 03m | 1h 28m | 5h 16m | 6h 37m      |
-| **COST*** | $8.56  | $29.10 | $13.06 | $16.41      |
 
-
-*All experiments are ran on Google Cloud Platform. Prices are on-demand prices
-(not preemptible), obtained on May 12, 2021 for zone Iowa (us-central1) using
-the following tables:
-[TPU pricing table](https://cloud.google.com/tpu/pricing) ($8.00/h for v3-8),
-[GPU pricing table](https://cloud.google.com/compute/gpus-pricing) ($2.48/h per
-V100 GPU). GPU experiments are ran without further optimizations besides JAX
+*All experiments are ran on Google Cloud Platform. 
+GPU experiments are ran without further optimizations besides JAX
 transformations. GPU experiments are ran with full precision (fp32). "TPU v3-8"
 are 8 TPU cores on 4 chips (each chips has 2 cores), while "8 GPU" are 8 GPU chips.

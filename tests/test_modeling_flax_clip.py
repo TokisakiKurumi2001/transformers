@@ -213,7 +213,23 @@ class FlaxCLIPVisionModelTest(FlaxModelTesterMixin, unittest.TestCase):
     def test_save_load_from_base(self):
         pass
 
+    # FlaxCLIPVisionModel does not have any base model
     def test_save_load_to_base(self):
+        pass
+
+    # FlaxCLIPVisionModel does not have any base model
+    @is_pt_flax_cross_test
+    def test_save_load_from_base_pt(self):
+        pass
+
+    # FlaxCLIPVisionModel does not have any base model
+    @is_pt_flax_cross_test
+    def test_save_load_to_base_pt(self):
+        pass
+
+    # FlaxCLIPVisionModel does not have any base model
+    @is_pt_flax_cross_test
+    def test_save_load_bf16_to_base_pt(self):
         pass
 
     @slow
@@ -307,7 +323,23 @@ class FlaxCLIPTextModelTest(FlaxModelTesterMixin, unittest.TestCase):
     def test_save_load_from_base(self):
         pass
 
+    # FlaxCLIPVisionModel does not have any base model
     def test_save_load_to_base(self):
+        pass
+
+    # FlaxCLIPVisionModel does not have any base model
+    @is_pt_flax_cross_test
+    def test_save_load_from_base_pt(self):
+        pass
+
+    # FlaxCLIPVisionModel does not have any base model
+    @is_pt_flax_cross_test
+    def test_save_load_to_base_pt(self):
+        pass
+
+    # FlaxCLIPVisionModel does not have any base model
+    @is_pt_flax_cross_test
+    def test_save_load_bf16_to_base_pt(self):
         pass
 
     @slow
@@ -356,7 +388,6 @@ class FlaxCLIPModelTest(FlaxModelTesterMixin, unittest.TestCase):
     def test_hidden_states_output(self):
         pass
 
-    @slow
     def test_jit_compilation(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
 
@@ -459,8 +490,6 @@ class FlaxCLIPModelTest(FlaxModelTesterMixin, unittest.TestCase):
 
                 with torch.no_grad():
                     pt_outputs = pt_model(**pt_inputs).to_tuple()
-                # PyTorch CLIPModel returns loss, we skip it here as we don't return loss in JAX/Flax models
-                pt_outputs = pt_outputs[1:]
 
                 fx_outputs = fx_model(**prepared_inputs_dict).to_tuple()
                 self.assertEqual(len(fx_outputs), len(pt_outputs), "Output lengths differ between Flax and PyTorch")
@@ -504,8 +533,6 @@ class FlaxCLIPModelTest(FlaxModelTesterMixin, unittest.TestCase):
 
                 with torch.no_grad():
                     pt_outputs = pt_model(**pt_inputs).to_tuple()
-                # PyTorch CLIPModel returns loss, we skip it here as we don't return loss in JAX/Flax models
-                pt_outputs = pt_outputs[1:]
 
                 fx_outputs = fx_model(**prepared_inputs_dict).to_tuple()
                 self.assertEqual(len(fx_outputs), len(pt_outputs), "Output lengths differ between Flax and PyTorch")
@@ -518,7 +545,6 @@ class FlaxCLIPModelTest(FlaxModelTesterMixin, unittest.TestCase):
 
                 with torch.no_grad():
                     pt_outputs_loaded = pt_model_loaded(**pt_inputs).to_tuple()
-                pt_outputs_loaded = pt_outputs_loaded[1:]
 
                 self.assertEqual(
                     len(fx_outputs), len(pt_outputs_loaded), "Output lengths differ between Flax and PyTorch"

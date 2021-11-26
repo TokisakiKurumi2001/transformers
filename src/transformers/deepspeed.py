@@ -50,7 +50,7 @@ class HfDeepSpeedConfig:
     values: ``"auto"``. Without this special logic the DeepSpeed configuration is not modified in any way.
 
     Args:
-        config_file_or_dict (:obj:`Union[str, Dict]`) - path to DeepSpeed config file or dict.
+        config_file_or_dict (:obj:`Union[str, Dict]`): path to DeepSpeed config file or dict.
 
     """
 
@@ -62,7 +62,7 @@ class HfDeepSpeedConfig:
 
         if isinstance(config_file_or_dict, dict):
             # Don't modify user's data should they want to reuse it (e.g. in tests), because once we
-            # modified it, it will not be accepted here again, since `auto` values would have been overriden
+            # modified it, it will not be accepted here again, since `auto` values would have been overridden
             config = deepcopy(config_file_or_dict)
         elif isinstance(config_file_or_dict, str):
             with io.open(config_file_or_dict, "r", encoding="utf-8") as f:
@@ -110,6 +110,29 @@ class HfDeepSpeedConfig:
         if config is None:
             return default
         return config.get(ds_key, default)
+
+    def del_config_sub_tree(self, ds_key_long, must_exist=False):
+        """
+        Deletes a sub-section of the config file if it's found.
+
+        Unless ``must_exist`` is :obj:`True` the section doesn't have to exist.
+        """
+        config = self.config
+
+        # find the config node of interest if it exists
+        nodes = ds_key_long.split(".")
+        for node in nodes:
+            parent_config = config
+            config = config.get(node)
+            if config is None:
+                if must_exist:
+                    raise ValueError(f"Can't find {ds_key_long} entry in the config: {self.config}")
+                else:
+                    return
+
+        # if found remove it
+        if parent_config is not None:
+            parent_config.pop(node)
 
     def is_true(self, ds_key_long):
         """
@@ -204,7 +227,6 @@ class HfTrainerDeepSpeedConfig(HfDeepSpeedConfig):
 
         self.fill_only("scheduler.params.warmup_min_lr", 0)  # not a trainer arg
         self.fill_match("scheduler.params.warmup_max_lr", args.learning_rate, "learning_rate")
-        self.fill_match("scheduler.params.warmup_num_steps", args.warmup_steps, "warmup_steps")
         # total_num_steps - will get set in trainer_config_finalize
 
         # fp16
@@ -245,6 +267,7 @@ class HfTrainerDeepSpeedConfig(HfDeepSpeedConfig):
 
         # scheduler
         self.fill_match("scheduler.params.total_num_steps", num_training_steps, "num_training_steps (calculated)")
+        self.fill_match("scheduler.params.warmup_num_steps", args.get_warmup_steps(num_training_steps), "warmup_steps")
 
         if len(self.mismatches) > 0:
             mismatches = "\n".join(self.mismatches)
@@ -280,7 +303,61 @@ def deepspeed_config():
         return None
 
 
-def deepspeed_init(trainer, num_training_steps, resume_from_checkpoint=None):
+def deepspeed_optim_sched(trainer, hf_deepspeed_config, args, num_training_steps):
+    """
+    A convenience wrapper that deals with optimizer and lr scheduler configuration.
+    """
+    config = hf_deepspeed_config.config
+
+    # Optimizer + Scheduler
+    # Currently supported combos:
+    # 1. DS scheduler + DS optimizer: Yes
+    # 2. HF scheduler + HF optimizer: Yes
+    # 3. DS scheduler + HF optimizer: Yes
+    # 4. HF scheduler + DS optimizer: Yes
+    #
+    # Unless Offload is enabled in which case it's:
+    # 1. DS scheduler + DS optimizer: Yes
+    # 2. HF scheduler + HF optimizer: Mostly*
+    # 3. DS scheduler + HF optimizer: Mostly*
+    # 4. HF scheduler + DS optimizer: Yes
+    #
+    # Mostly*: All non-native DeepSpeed optimizers that have both CPU and GPU implementation should work (except LAMB)
+
+    optimizer = None
+    if "optimizer" in config:
+        if args.adafactor:
+            raise ValueError(
+                "--adafactor was passed, but also found `optimizer` configured in the DeepSpeed config. "
+                "Only one optimizer can be configured."
+            )
+    else:
+        if hf_deepspeed_config.is_offload():
+            logger.info(
+                "Detected ZeRO Offload and non-DeepSpeed optimizers: This combination should work as long as the custom optimizer has both CPU and GPU implementation (except LAMB)"
+            )
+
+        # ds supports Adam, OneBitAdam, and Lamb optimizers and can import other optimizers from torch.
+        # But trainer uses AdamW by default.
+        optimizer = trainer.create_optimizer()
+        # To use other optimizers requires voiding warranty with: `zero_allow_untested_optimizer`
+        config["zero_allow_untested_optimizer"] = True
+
+    def _lr_scheduler_callable(optimizer):
+        return trainer.create_scheduler(num_training_steps=num_training_steps, optimizer=optimizer)
+
+    lr_scheduler = None
+    if "scheduler" not in config:
+        if optimizer is None:
+            # Optimizer is not available, so use callable to defer lr_scheduler creation to DS init
+            lr_scheduler = _lr_scheduler_callable
+        else:
+            lr_scheduler = trainer.create_scheduler(num_training_steps=num_training_steps, optimizer=optimizer)
+
+    return optimizer, lr_scheduler
+
+
+def deepspeed_init(trainer, num_training_steps, resume_from_checkpoint=None, inference=False):
     """
     Init DeepSpeed, after updating the DeepSpeed configuration with any relevant Trainer's args.
 
@@ -290,73 +367,41 @@ def deepspeed_init(trainer, num_training_steps, resume_from_checkpoint=None):
         trainer: Trainer object
         num_training_steps: per single gpu
         resume_from_checkpoint: path to a checkpoint if to resume from after normal DeepSpeedEngine load
+        inference: launch in inference mode (no optimizer and no lr scheduler)
 
     Returns: model, optimizer, lr_scheduler
 
     """
     import deepspeed
+    from deepspeed.utils import logger as ds_logger
 
     model = trainer.model
-
-    hf_deepspeed_config = trainer.args.hf_deepspeed_config
-    hf_deepspeed_config.trainer_config_finalize(trainer.args, model, num_training_steps)
+    args = trainer.args
 
     # resume config update - some bits like `model` and `num_training_steps` only become available during train
+    hf_deepspeed_config = args.hf_deepspeed_config
+    hf_deepspeed_config.trainer_config_finalize(args, model, num_training_steps)
     config = hf_deepspeed_config.config
 
-    # Optimizer + Scheduler
-    # Currently supported combos:
-    # 1. DS scheduler + DS optimizer: Yes
-    # 2. HF scheduler + HF optimizer: Yes
-    # 3. DS scheduler + HF optimizer: Yes
-    # 4. HF scheduler + DS optimizer: No
-    #
-    # Unless Offload is enabled in which case it's:
-    # 1. DS scheduler + DS optimizer: Yes
-    # 2. HF scheduler + HF optimizer: No
-    # 3. DS scheduler + HF optimizer: No
-    # 4. HF scheduler + DS optimizer: No
+    # set the Deepspeed log level consistent with the Trainer
+    ds_logger.setLevel(args.get_process_log_level())
 
-    optimizer = None
-    if "optimizer" in config:
-        if trainer.args.adafactor:
-            raise ValueError(
-                "--adafactor was passed, but also found `optimizer` configured in the DeepSpeed config. "
-                "Only one optimizer can be configured."
-            )
+    if inference:
+        # only Z3 makes sense for the inference
+        if not hf_deepspeed_config.is_zero3():
+            raise ValueError("ZeRO inference only makes sense with ZeRO Stage 3 - please adjust your config")
+
+        # in case the training config is re-used for inference
+        hf_deepspeed_config.del_config_sub_tree("optimizer")
+        hf_deepspeed_config.del_config_sub_tree("lr_scheduler")
+        optimizer, lr_scheduler = None, None
+        model_parameters = None
     else:
-        if hf_deepspeed_config.is_offload():
-            raise ValueError("ZeRO Offload can only work with DeepSpeed optimizers")
-
-        # ds supports Adam, OneBitAdam, and Lamb optimizers and can import other optimizers from torch.
-        # But trainer uses AdamW by default.
-        trainer.create_optimizer()
-        optimizer = trainer.optimizer
-        # To use other optimizers requires voiding warranty with: `zero_allow_untested_optimizer`
-        config["zero_allow_untested_optimizer"] = True
-
-    # DS schedulers (deepspeed/runtime/lr_schedules.py):
-    #
-    # DS name      | --lr_scheduler_type  | HF func                           | Notes
-    # -------------| ---------------------|-----------------------------------|--------------------
-    # LRRangeTest  | na                   | na                                | LRRT
-    # OneCycle     | na                   | na                                | 1CLR
-    # WarmupLR     | constant_with_warmup | get_constant_schedule_with_warmup | w/ warmup_min_lr=0
-    # WarmupDecayLR| linear               | get_linear_schedule_with_warmup   |
-    lr_scheduler = None
-    if "scheduler" not in config:
-        if "optimizer" in config:
-            # to make this option work, we need to init DS optimizer first, then init HS scheduler,
-            # then pass the HS scheduler to DS init, which is not possible at the moment
-            raise ValueError("At the moment HF scheduler + DeepSpeed optimizer combination is not possible")
-        else:
-            trainer.create_scheduler(num_training_steps=num_training_steps)
-            lr_scheduler = trainer.lr_scheduler
+        optimizer, lr_scheduler = deepspeed_optim_sched(trainer, hf_deepspeed_config, args, num_training_steps)
+        model_parameters = filter(lambda p: p.requires_grad, model.parameters())
 
     # keep for quick debug:
     # from pprint import pprint; pprint(config)
-
-    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
 
     model, optimizer, _, lr_scheduler = deepspeed.initialize(
         model=model,

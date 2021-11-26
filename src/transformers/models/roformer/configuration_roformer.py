@@ -22,7 +22,11 @@ logger = logging.get_logger(__name__)
 
 ROFORMER_PRETRAINED_CONFIG_ARCHIVE_MAP = {
     "junnyu/roformer_chinese_small": "https://huggingface.co/junnyu/roformer_chinese_small/resolve/main/config.json",
-    "junnyu/roformer_chinese_base": "https://huggingface.co/junnyu/roformer_chinese_base/resolve/main/config.json"
+    "junnyu/roformer_chinese_base": "https://huggingface.co/junnyu/roformer_chinese_base/resolve/main/config.json",
+    "junnyu/roformer_chinese_char_small": "https://huggingface.co/junnyu/roformer_chinese_char_small/resolve/main/config.json",
+    "junnyu/roformer_chinese_char_base": "https://huggingface.co/junnyu/roformer_chinese_char_base/resolve/main/config.json",
+    "junnyu/roformer_small_discriminator": "https://huggingface.co/junnyu/roformer_small_discriminator/resolve/main/config.json",
+    "junnyu/roformer_small_generator": "https://huggingface.co/junnyu/roformer_small_generator/resolve/main/config.json",
     # See all RoFormer models at https://huggingface.co/models?filter=roformer
 }
 
@@ -43,8 +47,9 @@ class RoFormerConfig(PretrainedConfig):
             Vocabulary size of the RoFormer model. Defines the number of different tokens that can be represented by
             the :obj:`inputs_ids` passed when calling :class:`~transformers.RoFormerModel` or
             :class:`~transformers.TFRoFormerModel`.
-        embedding_size (:obj:`int`, `optional`, defaults to 768):
-            Dimensionality of the encoder layers and the pooler layer.
+        embedding_size (:obj:`int`, `optional`, defaults to None):
+            Dimensionality of the encoder layers and the pooler layer. Defaults to the :obj:`hidden_size` if not
+            provided.
         hidden_size (:obj:`int`, `optional`, defaults to 768):
             Dimension of the encoder layers and the pooler layer.
         num_hidden_layers (:obj:`int`, `optional`, defaults to 12):
@@ -75,8 +80,6 @@ class RoFormerConfig(PretrainedConfig):
             relevant if ``config.is_decoder=True``.
         rotary_value (:obj:`bool`, `optional`, defaults to :obj:`False`):
             Whether or not apply rotary position embeddings on value layer.
-        gradient_checkpointing (:obj:`bool`, `optional`, defaults to :obj:`False`):
-            If :obj:`True`, use gradient checkpointing to save memory at the expense of slower backward pass.
 
     Example::
 
@@ -96,7 +99,7 @@ class RoFormerConfig(PretrainedConfig):
     def __init__(
         self,
         vocab_size=50000,
-        embedding_size=768,
+        embedding_size=None,
         hidden_size=768,
         num_hidden_layers=12,
         num_attention_heads=12,
@@ -109,7 +112,6 @@ class RoFormerConfig(PretrainedConfig):
         initializer_range=0.02,
         layer_norm_eps=1e-12,
         pad_token_id=0,
-        gradient_checkpointing=False,
         rotary_value=False,
         use_cache=True,
         **kwargs
@@ -117,7 +119,7 @@ class RoFormerConfig(PretrainedConfig):
         super().__init__(pad_token_id=pad_token_id, **kwargs)
 
         self.vocab_size = vocab_size
-        self.embedding_size = embedding_size
+        self.embedding_size = hidden_size if embedding_size is None else embedding_size
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
@@ -129,6 +131,5 @@ class RoFormerConfig(PretrainedConfig):
         self.type_vocab_size = type_vocab_size
         self.initializer_range = initializer_range
         self.layer_norm_eps = layer_norm_eps
-        self.gradient_checkpointing = gradient_checkpointing
         self.rotary_value = rotary_value
         self.use_cache = use_cache

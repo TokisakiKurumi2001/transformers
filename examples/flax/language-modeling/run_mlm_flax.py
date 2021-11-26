@@ -25,6 +25,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
+from itertools import chain
 
 # You can also adapt this script on your own masked language modeling task. Pointers for this are left as comments.
 from pathlib import Path
@@ -41,6 +42,7 @@ import optax
 from flax import jax_utils, traverse_util
 from flax.training import train_state
 from flax.training.common_utils import get_metrics, onehot, shard
+from huggingface_hub import Repository
 from transformers import (
     CONFIG_MAPPING,
     FLAX_MODEL_FOR_MASKED_LM_MAPPING,
@@ -54,22 +56,7 @@ from transformers import (
     is_tensorboard_available,
     set_seed,
 )
-
-
-# Cache the result
-has_tensorboard = is_tensorboard_available()
-if has_tensorboard:
-    try:
-        from flax.metrics.tensorboard import SummaryWriter
-    except ImportError as ie:
-        has_tensorboard = False
-        print(f"Unable to display metrics through TensorBoard because some package are not installed: {ie}")
-
-else:
-    print(
-        "Unable to display metrics through TensorBoard because the package is not installed: "
-        "Please run pip install tensorboard to enable."
-    )
+from transformers.file_utils import get_full_repo_name
 
 
 MODEL_CONFIG_CLASSES = list(FLAX_MODEL_FOR_MASKED_LM_MAPPING.keys())
@@ -230,7 +217,7 @@ class FlaxDataCollatorForLanguageModeling:
 
     def mask_tokens(
         self, inputs: np.ndarray, special_tokens_mask: Optional[np.ndarray]
-    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original.
         """
@@ -269,7 +256,7 @@ def generate_batch_splits(samples_idx: jnp.ndarray, batch_size: int) -> jnp.ndar
     return batch_idx
 
 
-def write_metric(train_metrics, eval_metrics, train_time, step):
+def write_train_metric(summary_writer, train_metrics, train_time, step):
     summary_writer.scalar("train_time", train_time, step)
 
     train_metrics = get_metrics(train_metrics)
@@ -278,6 +265,8 @@ def write_metric(train_metrics, eval_metrics, train_time, step):
         for i, val in enumerate(vals):
             summary_writer.scalar(tag, val, step - len(vals) + i + 1)
 
+
+def write_eval_metric(summary_writer, eval_metrics, step):
     for metric_name, value in eval_metrics.items():
         summary_writer.scalar(f"eval_{metric_name}", value, step)
 
@@ -315,16 +304,22 @@ if __name__ == "__main__":
 
     # Log on each process the small summary:
     logger = logging.getLogger(__name__)
-    logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
-    )
 
     # Set the verbosity to info of the Transformers logger (on main process only):
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
+
+    # Handle the repository creation
+    if training_args.push_to_hub:
+        if training_args.hub_model_id is None:
+            repo_name = get_full_repo_name(
+                Path(training_args.output_dir).absolute().name, token=training_args.hub_token
+            )
+        else:
+            repo_name = training_args.hub_model_id
+        repo = Repository(training_args.output_dir, clone_from=repo_name)
 
     # Get the datasets: you can either provide your own CSV/JSON/TXT training and evaluation files (see below)
     # or just provide the name of one of the public datasets available on the hub at https://huggingface.co/datasets/
@@ -362,6 +357,20 @@ if __name__ == "__main__":
         if extension == "txt":
             extension = "text"
         datasets = load_dataset(extension, data_files=data_files, cache_dir=model_args.cache_dir)
+
+        if "validation" not in datasets.keys():
+            datasets["validation"] = load_dataset(
+                extension,
+                data_files=data_files,
+                split=f"train[:{data_args.validation_split_percentage}%]",
+                cache_dir=model_args.cache_dir,
+            )
+            datasets["train"] = load_dataset(
+                extension,
+                data_files=data_files,
+                split=f"train[{data_args.validation_split_percentage}%:]",
+                cache_dir=model_args.cache_dir,
+            )
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
 
@@ -445,11 +454,12 @@ if __name__ == "__main__":
         # max_seq_length.
         def group_texts(examples):
             # Concatenate all texts.
-            concatenated_examples = {k: sum(examples[k], []) for k in examples.keys()}
+            concatenated_examples = {k: list(chain(*examples[k])) for k in examples.keys()}
             total_length = len(concatenated_examples[list(examples.keys())[0]])
             # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
             # customize this part to your needs.
-            total_length = (total_length // max_seq_length) * max_seq_length
+            if total_length >= max_seq_length:
+                total_length = (total_length // max_seq_length) * max_seq_length
             # Split by chunks of max_len.
             result = {
                 k: [t[i : i + max_seq_length] for i in range(0, total_length, max_seq_length)]
@@ -471,8 +481,22 @@ if __name__ == "__main__":
         )
 
     # Enable tensorboard only on the master node
+    has_tensorboard = is_tensorboard_available()
     if has_tensorboard and jax.process_index() == 0:
-        summary_writer = SummaryWriter(log_dir=Path(training_args.output_dir).joinpath("logs").as_posix())
+        try:
+            from flax.metrics.tensorboard import SummaryWriter
+
+            summary_writer = SummaryWriter(log_dir=Path(training_args.output_dir))
+        except ImportError as ie:
+            has_tensorboard = False
+            logger.warning(
+                f"Unable to display metrics through TensorBoard because some package are not installed: {ie}"
+            )
+    else:
+        logger.warning(
+            "Unable to display metrics through TensorBoard because the package is not installed: "
+            "Please run pip install tensorboard to enable."
+        )
 
     # Data collator
     # This one will take care of randomly masking the tokens.
@@ -482,7 +506,14 @@ if __name__ == "__main__":
     rng = jax.random.PRNGKey(training_args.seed)
     dropout_rngs = jax.random.split(rng, jax.local_device_count())
 
-    model = FlaxAutoModelForMaskedLM.from_config(config, seed=training_args.seed, dtype=getattr(jnp, model_args.dtype))
+    if model_args.model_name_or_path:
+        model = FlaxAutoModelForMaskedLM.from_pretrained(
+            model_args.model_name_or_path, config=config, seed=training_args.seed, dtype=getattr(jnp, model_args.dtype)
+        )
+    else:
+        model = FlaxAutoModelForMaskedLM.from_config(
+            config, seed=training_args.seed, dtype=getattr(jnp, model_args.dtype)
+        )
 
     # Store some constant
     num_epochs = int(training_args.num_train_epochs)
@@ -508,23 +539,33 @@ if __name__ == "__main__":
     # to bias and LayerNorm scale parameters. decay_mask_fn returns a
     # mask boolean with the same structure as the parameters.
     # The mask is True for parameters that should be decayed.
+    # Note that this mask is specifically adapted for FlaxBERT-like models.
+    # For other models, one should correct the layer norm parameter naming
+    # accordingly.
     def decay_mask_fn(params):
         flat_params = traverse_util.flatten_dict(params)
         flat_mask = {path: (path[-1] != "bias" and path[-2:] != ("LayerNorm", "scale")) for path in flat_params}
         return traverse_util.unflatten_dict(flat_mask)
 
     # create adam optimizer
-    adamw = optax.adamw(
-        learning_rate=linear_decay_lr_schedule_fn,
-        b1=training_args.adam_beta1,
-        b2=training_args.adam_beta2,
-        eps=1e-8,
-        weight_decay=training_args.weight_decay,
-        mask=decay_mask_fn,
-    )
+    if training_args.adafactor:
+        # We use the default parameters here to initialize adafactor,
+        # For more details about the parameters please check https://github.com/deepmind/optax/blob/ed02befef9bf81cbbf236be3d2b0e032e9ed4a40/optax/_src/alias.py#L74
+        optimizer = optax.adafactor(
+            learning_rate=linear_decay_lr_schedule_fn,
+        )
+    else:
+        optimizer = optax.adamw(
+            learning_rate=linear_decay_lr_schedule_fn,
+            b1=training_args.adam_beta1,
+            b2=training_args.adam_beta2,
+            eps=training_args.adam_epsilon,
+            weight_decay=training_args.weight_decay,
+            mask=decay_mask_fn,
+        )
 
     # Setup train state
-    state = train_state.TrainState.create(apply_fn=model.__call__, params=model.params, tx=adamw)
+    state = train_state.TrainState.create(apply_fn=model.__call__, params=model.params, tx=optimizer)
 
     # Define gradient update step fn
     def train_step(state, batch, dropout_rng):
@@ -582,12 +623,12 @@ if __name__ == "__main__":
     # Replicate the train state on each device
     state = jax_utils.replicate(state)
 
-    train_metrics = []
     train_time = 0
     epochs = tqdm(range(num_epochs), desc=f"Epoch ... (1/{num_epochs})", position=0)
     for epoch in epochs:
         # ======================== Training ================================
         train_start = time.time()
+        train_metrics = []
 
         # Create sampling rng
         rng, input_rng = jax.random.split(rng)
@@ -598,7 +639,7 @@ if __name__ == "__main__":
         train_batch_idx = generate_batch_splits(train_samples_idx, train_batch_size)
 
         # Gather the indexes for creating the batch and do a training step
-        for i, batch_idx in enumerate(tqdm(train_batch_idx, desc="Training...", position=1)):
+        for step, batch_idx in enumerate(tqdm(train_batch_idx, desc="Training...", position=1)):
             samples = [tokenized_datasets["train"][int(idx)] for idx in batch_idx]
             model_inputs = data_collator(samples, pad_to_multiple_of=16)
 
@@ -607,44 +648,55 @@ if __name__ == "__main__":
             state, train_metric, dropout_rngs = p_train_step(state, model_inputs, dropout_rngs)
             train_metrics.append(train_metric)
 
-        train_time += time.time() - train_start
+            cur_step = epoch * (num_train_samples // train_batch_size) + step
 
-        epochs.write(
-            f"Epoch... ({epoch + 1}/{num_epochs} | Loss: {train_metric['loss']}, Learning Rate: {train_metric['learning_rate']})"
-        )
+            if cur_step % training_args.logging_steps == 0 and cur_step > 0:
+                # Save metrics
+                train_metric = jax_utils.unreplicate(train_metric)
+                train_time += time.time() - train_start
+                if has_tensorboard and jax.process_index() == 0:
+                    write_train_metric(summary_writer, train_metrics, train_time, cur_step)
 
-        # ======================== Evaluating ==============================
-        num_eval_samples = len(tokenized_datasets["validation"])
-        eval_samples_idx = jnp.arange(num_eval_samples)
-        eval_batch_idx = generate_batch_splits(eval_samples_idx, eval_batch_size)
+                epochs.write(
+                    f"Step... ({cur_step} | Loss: {train_metric['loss']}, Learning Rate: {train_metric['learning_rate']})"
+                )
 
-        eval_metrics = []
-        for i, batch_idx in enumerate(tqdm(eval_batch_idx, desc="Evaluating ...", position=2)):
-            samples = [tokenized_datasets["validation"][int(idx)] for idx in batch_idx]
-            model_inputs = data_collator(samples, pad_to_multiple_of=16)
+                train_metrics = []
 
-            # Model forward
-            model_inputs = shard(model_inputs.data)
-            metrics = p_eval_step(state.params, model_inputs)
-            eval_metrics.append(metrics)
+            if cur_step % training_args.eval_steps == 0 and cur_step > 0:
+                # ======================== Evaluating ==============================
+                num_eval_samples = len(tokenized_datasets["validation"])
+                eval_samples_idx = jnp.arange(num_eval_samples)
+                eval_batch_idx = generate_batch_splits(eval_samples_idx, eval_batch_size)
 
-        # normalize eval metrics
-        eval_metrics = get_metrics(eval_metrics)
-        eval_metrics = jax.tree_map(jnp.sum, eval_metrics)
-        eval_normalizer = eval_metrics.pop("normalizer")
-        eval_metrics = jax.tree_map(lambda x: x / eval_normalizer, eval_metrics)
+                eval_metrics = []
+                for i, batch_idx in enumerate(tqdm(eval_batch_idx, desc="Evaluating ...", position=2)):
+                    samples = [tokenized_datasets["validation"][int(idx)] for idx in batch_idx]
+                    model_inputs = data_collator(samples, pad_to_multiple_of=16)
 
-        # Update progress bar
-        epochs.desc = (
-            f"Epoch... ({epoch + 1}/{num_epochs} | Loss: {eval_metrics['loss']}, Acc: {eval_metrics['accuracy']})"
-        )
+                    # Model forward
+                    model_inputs = shard(model_inputs.data)
+                    metrics = p_eval_step(state.params, model_inputs)
+                    eval_metrics.append(metrics)
 
-        # Save metrics
-        if has_tensorboard and jax.process_index() == 0:
-            cur_step = epoch * (len(tokenized_datasets["train"]) // train_batch_size)
-            write_metric(train_metrics, eval_metrics, train_time, cur_step)
+                # normalize eval metrics
+                eval_metrics = get_metrics(eval_metrics)
+                eval_metrics = jax.tree_map(jnp.sum, eval_metrics)
+                eval_normalizer = eval_metrics.pop("normalizer")
+                eval_metrics = jax.tree_map(lambda x: x / eval_normalizer, eval_metrics)
 
-    # save last checkpoint
-    if jax.process_index() == 0:
-        params = jax.device_get(jax.tree_map(lambda x: x[0], state.params))
-        model.save_pretrained(training_args.output_dir, params=params)
+                # Update progress bar
+                epochs.desc = f"Step... ({cur_step} | Loss: {eval_metrics['loss']}, Acc: {eval_metrics['accuracy']})"
+
+                # Save metrics
+                if has_tensorboard and jax.process_index() == 0:
+                    write_eval_metric(summary_writer, eval_metrics, cur_step)
+
+            if cur_step % training_args.save_steps == 0 and cur_step > 0:
+                # save checkpoint after each epoch and push checkpoint to the hub
+                if jax.process_index() == 0:
+                    params = jax.device_get(jax.tree_map(lambda x: x[0], state.params))
+                    model.save_pretrained(training_args.output_dir, params=params)
+                    tokenizer.save_pretrained(training_args.output_dir)
+                    if training_args.push_to_hub:
+                        repo.push_to_hub(commit_message=f"Saving weights and logs of step {cur_step}", blocking=False)

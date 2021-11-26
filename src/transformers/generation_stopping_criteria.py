@@ -35,7 +35,7 @@ class StoppingCriteria(ABC):
     """Abstract base class for all stopping criteria that can be applied during generation."""
 
     @add_start_docstrings(STOPPING_CRITERIA_INPUTS_DOCSTRING)
-    def __call__(self, input_ids: torch.LongTensor, score: torch.FloatTensor, **kwargs) -> bool:
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
         raise NotImplementedError("StoppingCriteria needs to be subclassed")
 
 
@@ -71,6 +71,12 @@ class MaxNewTokensCriteria(StoppingCriteria):
     """
 
     def __init__(self, start_length: int, max_new_tokens: int):
+        warnings.warn(
+            "The class `MaxNewTokensCriteria` is deprecated. "
+            f"Please use `MaxLengthCriteria(max_length={start_length + max_new_tokens})` "
+            "with `max_length = start_length + max_new_tokens` instead.",
+            FutureWarning,
+        )
         self.start_length = start_length
         self.max_new_tokens = max_new_tokens
         self.max_length = start_length + max_new_tokens

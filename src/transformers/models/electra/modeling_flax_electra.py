@@ -21,7 +21,6 @@ import flax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import jaxlib.xla_extension as jax_xla
 from flax.core.frozen_dict import FrozenDict
 from flax.linen.attention import dot_product_attention_weights
 from jax import lax
@@ -60,24 +59,24 @@ class FlaxElectraForPreTrainingOutput(ModelOutput):
     Output type of :class:`~transformers.ElectraForPreTraining`.
 
     Args:
-        logits (:obj:`jax_xla.DeviceArray` of shape :obj:`(batch_size, sequence_length, config.vocab_size)`):
+        logits (:obj:`jnp.ndarray` of shape :obj:`(batch_size, sequence_length, config.vocab_size)`):
             Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        hidden_states (:obj:`tuple(jax_xla.DeviceArray)`, `optional`, returned when ``output_hidden_states=True`` is passed or when ``config.output_hidden_states=True``):
-            Tuple of :obj:`jax_xla.DeviceArray` (one for the output of the embeddings + one for the output of each
-            layer) of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+        hidden_states (:obj:`tuple(jnp.ndarray)`, `optional`, returned when ``output_hidden_states=True`` is passed or when ``config.output_hidden_states=True``):
+            Tuple of :obj:`jnp.ndarray` (one for the output of the embeddings + one for the output of each layer) of
+            shape :obj:`(batch_size, sequence_length, hidden_size)`.
 
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(jax_xla.DeviceArray)`, `optional`, returned when ``output_attentions=True`` is passed or when ``config.output_attentions=True``):
-            Tuple of :obj:`jax_xla.DeviceArray` (one for each layer) of shape :obj:`(batch_size, num_heads,
-            sequence_length, sequence_length)`.
+        attentions (:obj:`tuple(jnp.ndarray)`, `optional`, returned when ``output_attentions=True`` is passed or when ``config.output_attentions=True``):
+            Tuple of :obj:`jnp.ndarray` (one for each layer) of shape :obj:`(batch_size, num_heads, sequence_length,
+            sequence_length)`.
 
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
     """
 
-    logits: jax_xla.DeviceArray = None
-    hidden_states: Optional[Tuple[jax_xla.DeviceArray]] = None
-    attentions: Optional[Tuple[jax_xla.DeviceArray]] = None
+    logits: jnp.ndarray = None
+    hidden_states: Optional[Tuple[jnp.ndarray]] = None
+    attentions: Optional[Tuple[jnp.ndarray]] = None
 
 
 ELECTRA_START_DOCSTRING = r"""
@@ -149,19 +148,16 @@ class FlaxElectraEmbeddings(nn.Module):
             self.config.vocab_size,
             self.config.embedding_size,
             embedding_init=jax.nn.initializers.normal(stddev=self.config.initializer_range),
-            dtype=self.dtype,
         )
         self.position_embeddings = nn.Embed(
             self.config.max_position_embeddings,
             self.config.embedding_size,
             embedding_init=jax.nn.initializers.normal(stddev=self.config.initializer_range),
-            dtype=self.dtype,
         )
         self.token_type_embeddings = nn.Embed(
             self.config.type_vocab_size,
             self.config.embedding_size,
             embedding_init=jax.nn.initializers.normal(stddev=self.config.initializer_range),
-            dtype=self.dtype,
         )
         self.LayerNorm = nn.LayerNorm(epsilon=self.config.layer_norm_eps, dtype=self.dtype)
         self.dropout = nn.Dropout(rate=self.config.hidden_dropout_prob)
@@ -197,17 +193,17 @@ class FlaxElectraSelfAttention(nn.Module):
         self.query = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
         self.key = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
         self.value = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
 
     def __call__(self, hidden_states, attention_mask, deterministic=True, output_attentions: bool = False):
@@ -266,7 +262,7 @@ class FlaxElectraSelfOutput(nn.Module):
     def setup(self):
         self.dense = nn.Dense(
             self.config.hidden_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
         self.LayerNorm = nn.LayerNorm(epsilon=self.config.layer_norm_eps, dtype=self.dtype)
@@ -314,7 +310,7 @@ class FlaxElectraIntermediate(nn.Module):
     def setup(self):
         self.dense = nn.Dense(
             self.config.intermediate_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
         self.activation = ACT2FN[self.config.hidden_act]
@@ -333,7 +329,7 @@ class FlaxElectraOutput(nn.Module):
     def setup(self):
         self.dense = nn.Dense(
             self.config.hidden_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
         self.dropout = nn.Dropout(rate=self.config.hidden_dropout_prob)
@@ -571,7 +567,7 @@ class FlaxElectraModule(nn.Module):
     def setup(self):
         self.embeddings = FlaxElectraEmbeddings(self.config, dtype=self.dtype)
         if self.config.embedding_size != self.config.hidden_size:
-            self.embeddings_project = nn.Dense(self.config.hidden_size)
+            self.embeddings_project = nn.Dense(self.config.hidden_size, dtype=self.dtype)
         self.encoder = FlaxElectraEncoder(self.config, dtype=self.dtype)
 
     def __call__(
@@ -621,17 +617,19 @@ class FlaxElectraTiedDense(nn.Module):
     bias_init: Callable[..., np.ndarray] = jax.nn.initializers.zeros
 
     def setup(self):
-        bias = self.param("bias", self.bias_init, (self.embedding_size,))
-        self.bias = jnp.asarray(bias, dtype=self.dtype)
+        self.bias = self.param("bias", self.bias_init, (self.embedding_size,))
 
     def __call__(self, x, kernel):
+        x = jnp.asarray(x, self.dtype)
+        kernel = jnp.asarray(kernel, self.dtype)
         y = lax.dot_general(
             x,
             kernel,
             (((x.ndim - 1,), (0,)), ((), ())),
             precision=self.precision,
         )
-        return y + self.bias
+        bias = jnp.asarray(self.bias, self.dtype)
+        return y + bias
 
 
 class FlaxElectraForMaskedLMModule(nn.Module):
@@ -640,7 +638,7 @@ class FlaxElectraForMaskedLMModule(nn.Module):
 
     def setup(self):
         self.electra = FlaxElectraModule(config=self.config, dtype=self.dtype)
-        self.generator_predictions = FlaxElectraGeneratorPredictions(config=self.config)
+        self.generator_predictions = FlaxElectraGeneratorPredictions(config=self.config, dtype=self.dtype)
         if self.config.tie_word_embeddings:
             self.generator_lm_head = FlaxElectraTiedDense(self.config.vocab_size, dtype=self.dtype)
         else:
@@ -762,7 +760,7 @@ FLAX_ELECTRA_FOR_PRETRAINING_DOCSTRING = """
         >>> tokenizer = ElectraTokenizer.from_pretrained('google/electra-small-discriminator')
         >>> model = FlaxElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
 
-        >>> inputs = tokenizer("Hello, my dog is cute", return_tensors="jax")
+        >>> inputs = tokenizer("Hello, my dog is cute", return_tensors="np")
         >>> outputs = model(**inputs)
 
         >>> prediction_logits = outputs.logits
@@ -783,8 +781,13 @@ class FlaxElectraForTokenClassificationModule(nn.Module):
 
     def setup(self):
         self.electra = FlaxElectraModule(config=self.config, dtype=self.dtype)
-        self.dropout = nn.Dropout(self.config.hidden_dropout_prob)
-        self.classifier = nn.Dense(self.config.num_labels)
+        classifier_dropout = (
+            self.config.classifier_dropout
+            if self.config.classifier_dropout is not None
+            else self.config.hidden_dropout_prob
+        )
+        self.dropout = nn.Dropout(classifier_dropout)
+        self.classifier = nn.Dense(self.config.num_labels, dtype=self.dtype)
 
     def __call__(
         self,
@@ -1069,7 +1072,12 @@ class FlaxElectraClassificationHead(nn.Module):
 
     def setup(self):
         self.dense = nn.Dense(self.config.hidden_size, dtype=self.dtype)
-        self.dropout = nn.Dropout(self.config.hidden_dropout_prob)
+        classifier_dropout = (
+            self.config.classifier_dropout
+            if self.config.classifier_dropout is not None
+            else self.config.hidden_dropout_prob
+        )
+        self.dropout = nn.Dropout(classifier_dropout)
         self.out_proj = nn.Dense(self.config.num_labels, dtype=self.dtype)
 
     def __call__(self, hidden_states, deterministic: bool = True):

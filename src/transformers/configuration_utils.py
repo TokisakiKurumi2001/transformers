@@ -19,14 +19,30 @@
 import copy
 import json
 import os
-from typing import Any, Dict, Tuple, Union
+import re
+import warnings
+from typing import Any, Dict, Optional, Tuple, Union
+
+from packaging import version
 
 from . import __version__
-from .file_utils import CONFIG_NAME, PushToHubMixin, cached_path, hf_bucket_url, is_offline_mode, is_remote_url
+from .file_utils import (
+    CONFIG_NAME,
+    PushToHubMixin,
+    cached_path,
+    copy_func,
+    get_list_of_files,
+    hf_bucket_url,
+    is_offline_mode,
+    is_remote_url,
+    is_torch_available,
+)
 from .utils import logging
 
 
 logger = logging.get_logger(__name__)
+FULL_CONFIGURATION_FILE = "config.json"
+_re_configuration_file = re.compile(r"config\.(.*)\.json")
 
 
 class PretrainedConfig(PushToHubMixin):
@@ -48,6 +64,8 @@ class PretrainedConfig(PushToHubMixin):
           :class:`~RagConfig`.
         - **keys_to_ignore_at_inference** (:obj:`List[str]`) -- A list of keys to ignore by default when looking at
           dictionary outputs of the model during inference.
+        - **attribute_map** (:obj:`Dict[str, str]`) -- A dict that maps model specific attribute names to the
+          standardized naming of attributes.
 
     Common attributes (present in all subclasses)
 
@@ -74,11 +92,14 @@ class PretrainedConfig(PushToHubMixin):
             Whether the model is used as an encoder/decoder or not.
         is_decoder (:obj:`bool`, `optional`, defaults to :obj:`False`):
             Whether the model is used as decoder or not (in which case it's used as an encoder).
+        cross_attention_hidden_size (:obj:`bool`, `optional`):
+            The hidden size of the cross-attention layer in case the model is used as a decoder in an encoder-decoder
+            setting and the cross-attention hidden dimension differs from `self.config.hidden_size`.
         add_cross_attention (:obj:`bool`, `optional`, defaults to :obj:`False`):
             Whether cross-attention layers should be added to the model. Note, this option is only relevant for models
             that can be used as decoder models within the `:class:~transformers.EncoderDecoderModel` class, which
             consists of all models in ``AUTO_MODELS_FOR_CAUSAL_LM``.
-        tie_encoder_decoder (:obj:`bool`, `optional`, defaults to :obj:`False`)
+        tie_encoder_decoder (:obj:`bool`, `optional`, defaults to :obj:`False`):
             Whether all encoder weights should be tied to their equivalent decoder weights. This requires the encoder
             and decoder model to have the exact same parameter names.
         prune_heads (:obj:`Dict[int, List[int]]`, `optional`, defaults to :obj:`{}`):
@@ -192,6 +213,15 @@ class PretrainedConfig(PushToHubMixin):
         - **tie_word_embeddings** (:obj:`bool`, `optional`, defaults to :obj:`True`) -- Whether the model's input and
           output word embeddings should be tied. Note that this is only relevant if the model has a output word
           embedding layer.
+        - **torch_dtype** (:obj:`str`, `optional`) -- The :obj:`dtype` of the weights. This attribute can be used to
+          initialize the model to a non-default ``dtype`` (which is normally ``float32``) and thus allow for optimal
+          storage allocation. For example, if the saved model is ``float16``, ideally we want to load it back using the
+          minimal amount of memory needed to load ``float16`` weights. Since the config object is stored in plain text,
+          this attribute contains just the floating type string without the ``torch.`` prefix. For example, for
+          ``torch.float16`` ``torch_dtype`` is the ``"float16"`` string.
+
+          This attribute is currently not being used during model loading time, but this may change in the future
+          versions. But we can already start preparing for the future by saving the dtype with save_pretrained.
 
     TensorFlow specific parameters
 
@@ -200,6 +230,17 @@ class PretrainedConfig(PushToHubMixin):
     """
     model_type: str = ""
     is_composition: bool = False
+    attribute_map: Dict[str, str] = {}
+
+    def __setattr__(self, key, value):
+        if key in super().__getattribute__("attribute_map"):
+            key = super().__getattribute__("attribute_map")[key]
+        super().__setattr__(key, value)
+
+    def __getattribute__(self, key):
+        if key != "attribute_map" and key in super().__getattribute__("attribute_map"):
+            key = super().__getattribute__("attribute_map")[key]
+        return super().__getattribute__(key)
 
     def __init__(self, **kwargs):
         # Attributes with defaults
@@ -207,6 +248,7 @@ class PretrainedConfig(PushToHubMixin):
         self.output_hidden_states = kwargs.pop("output_hidden_states", False)
         self.output_attentions = kwargs.pop("output_attentions", False)
         self.torchscript = kwargs.pop("torchscript", False)  # Only used by PyTorch models
+        self.torch_dtype = kwargs.pop("torch_dtype", None)  # Only used by PyTorch models
         self.use_bfloat16 = kwargs.pop("use_bfloat16", False)
         self.pruned_heads = kwargs.pop("pruned_heads", {})
         self.tie_word_embeddings = kwargs.pop(
@@ -216,6 +258,7 @@ class PretrainedConfig(PushToHubMixin):
         # Is decoder is used in encoder-decoder models to differentiate encoder from decoder
         self.is_encoder_decoder = kwargs.pop("is_encoder_decoder", False)
         self.is_decoder = kwargs.pop("is_decoder", False)
+        self.cross_attention_hidden_size = kwargs.pop("cross_attention_hidden_size", None)
         self.add_cross_attention = kwargs.pop("add_cross_attention", False)
         self.tie_encoder_decoder = kwargs.pop("tie_encoder_decoder", False)
 
@@ -255,6 +298,14 @@ class PretrainedConfig(PushToHubMixin):
         else:
             self.num_labels = kwargs.pop("num_labels", 2)
 
+        if self.torch_dtype is not None and isinstance(self.torch_dtype, str):
+            # we will start using self.torch_dtype in v5, but to be consistent with
+            # from_pretrained's torch_dtype arg convert it to an actual torch.dtype object
+            if is_torch_available():
+                import torch
+
+                self.torch_dtype = getattr(torch, self.torch_dtype)
+
         # Tokenizer arguments TODO: eventually tokenizer and models should share the same config
         self.tokenizer_class = kwargs.pop("tokenizer_class", None)
         self.prefix = kwargs.pop("prefix", None)
@@ -273,7 +324,7 @@ class PretrainedConfig(PushToHubMixin):
         allowed_problem_types = ("regression", "single_label_classification", "multi_label_classification")
         if self.problem_type is not None and self.problem_type not in allowed_problem_types:
             raise ValueError(
-                f"The config parameter `problem_type` wasnot understood: received {self.problem_type}"
+                f"The config parameter `problem_type` was not understood: received {self.problem_type} "
                 "but only 'regression', 'single_label_classification' and 'multi_label_classification' are valid."
             )
 
@@ -289,6 +340,14 @@ class PretrainedConfig(PushToHubMixin):
 
         # Drop the transformers version info
         self.transformers_version = kwargs.pop("transformers_version", None)
+
+        # Deal with gradient checkpointing
+        if kwargs.get("gradient_checkpointing", False):
+            warnings.warn(
+                "Passing `gradient_checkpointing` to a config initialization is deprecated and will be removed in v5 "
+                "Transformers. Using `model.gradient_checkpointing_enable()` instead, or if you are using the "
+                "`Trainer` API, pass `gradient_checkpointing=True` in your `TrainingArguments`."
+            )
 
         # Additional attributes without default values
         for key, value in kwargs.items():
@@ -323,7 +382,7 @@ class PretrainedConfig(PushToHubMixin):
 
     @num_labels.setter
     def num_labels(self, num_labels: int):
-        if self.id2label is None or len(self.id2label) != num_labels:
+        if not hasattr(self, "id2label") or self.id2label is None or len(self.id2label) != num_labels:
             self.id2label = {i: f"LABEL_{i}" for i in range(num_labels)}
             self.label2id = dict(zip(self.id2label.values(), self.id2label.keys()))
 
@@ -483,14 +542,22 @@ class PretrainedConfig(PushToHubMixin):
             local_files_only = True
 
         pretrained_model_name_or_path = str(pretrained_model_name_or_path)
-        if os.path.isdir(pretrained_model_name_or_path):
-            config_file = os.path.join(pretrained_model_name_or_path, CONFIG_NAME)
-        elif os.path.isfile(pretrained_model_name_or_path) or is_remote_url(pretrained_model_name_or_path):
+        if os.path.isfile(pretrained_model_name_or_path) or is_remote_url(pretrained_model_name_or_path):
             config_file = pretrained_model_name_or_path
         else:
-            config_file = hf_bucket_url(
-                pretrained_model_name_or_path, filename=CONFIG_NAME, revision=revision, mirror=None
+            configuration_file = get_configuration_file(
+                pretrained_model_name_or_path,
+                revision=revision,
+                use_auth_token=use_auth_token,
+                local_files_only=local_files_only,
             )
+
+            if os.path.isdir(pretrained_model_name_or_path):
+                config_file = os.path.join(pretrained_model_name_or_path, configuration_file)
+            else:
+                config_file = hf_bucket_url(
+                    pretrained_model_name_or_path, filename=configuration_file, revision=revision, mirror=None
+                )
 
         try:
             # Load from URL or cache if already cached
@@ -511,12 +578,17 @@ class PretrainedConfig(PushToHubMixin):
             logger.error(err)
             msg = (
                 f"Can't load config for '{pretrained_model_name_or_path}'. Make sure that:\n\n"
-                f"- '{pretrained_model_name_or_path}' is a correct model identifier listed on 'https://huggingface.co/models'\n\n"
+                f"- '{pretrained_model_name_or_path}' is a correct model identifier listed on 'https://huggingface.co/models'\n"
+                f"  (make sure '{pretrained_model_name_or_path}' is not a path to a local directory with something else, in that case)\n\n"
                 f"- or '{pretrained_model_name_or_path}' is the correct path to a directory containing a {CONFIG_NAME} file\n\n"
             )
+
+            if revision is not None:
+                msg += f"- or '{revision}' is a valid git identifier (branch name, a tag name, or a commit id) that exists for this model name as listed on its model page on 'https://huggingface.co/models'\n\n"
+
             raise EnvironmentError(msg)
 
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             msg = (
                 f"Couldn't reach server at '{config_file}' to download configuration file or "
                 "configuration file is not a valid JSON file. "
@@ -559,7 +631,8 @@ class PretrainedConfig(PushToHubMixin):
         for key, value in kwargs.items():
             if hasattr(config, key):
                 setattr(config, key, value)
-                to_remove.append(key)
+                if key != "torch_dtype":
+                    to_remove.append(key)
         for key in to_remove:
             kwargs.pop(key, None)
 
@@ -625,6 +698,8 @@ class PretrainedConfig(PushToHubMixin):
             ):
                 serializable_config_dict[key] = value
 
+        self.dict_torch_dtype_to_str(serializable_config_dict)
+
         return serializable_config_dict
 
     def to_dict(self) -> Dict[str, Any]:
@@ -640,6 +715,8 @@ class PretrainedConfig(PushToHubMixin):
 
         # Transformers version when serializing the model
         output["transformers_version"] = __version__
+
+        self.dict_torch_dtype_to_str(output)
 
         return output
 
@@ -722,3 +799,68 @@ class PretrainedConfig(PushToHubMixin):
                 )
 
             setattr(self, k, v)
+
+    def dict_torch_dtype_to_str(self, d: Dict[str, Any]) -> None:
+        """
+        Checks whether the passed dictionary has a `torch_dtype` key and if it's not None, converts torch.dtype to a
+        string of just the type. For example, :obj:`torch.float32` get converted into `"float32"` string, which can
+        then be stored in the json format.
+        """
+        if d.get("torch_dtype", None) is not None and not isinstance(d["torch_dtype"], str):
+            d["torch_dtype"] = str(d["torch_dtype"]).split(".")[1]
+
+
+def get_configuration_file(
+    path_or_repo: Union[str, os.PathLike],
+    revision: Optional[str] = None,
+    use_auth_token: Optional[Union[bool, str]] = None,
+    local_files_only: bool = False,
+) -> str:
+    """
+    Get the configuration file to use for this version of transformers.
+
+    Args:
+        path_or_repo (:obj:`str` or :obj:`os.PathLike`):
+            Can be either the id of a repo on huggingface.co or a path to a `directory`.
+        revision(:obj:`str`, `optional`, defaults to :obj:`"main"`):
+            The specific model version to use. It can be a branch name, a tag name, or a commit id, since we use a
+            git-based system for storing models and other artifacts on huggingface.co, so ``revision`` can be any
+            identifier allowed by git.
+        use_auth_token (:obj:`str` or `bool`, `optional`):
+            The token to use as HTTP bearer authorization for remote files. If :obj:`True`, will use the token
+            generated when running :obj:`transformers-cli login` (stored in :obj:`~/.huggingface`).
+        local_files_only (:obj:`bool`, `optional`, defaults to :obj:`False`):
+            Whether or not to only rely on local files and not to attempt to download any files.
+
+    Returns:
+        :obj:`str`: The configuration file to use.
+    """
+    # Inspect all files from the repo/folder.
+    all_files = get_list_of_files(
+        path_or_repo, revision=revision, use_auth_token=use_auth_token, local_files_only=local_files_only
+    )
+    configuration_files_map = {}
+    for file_name in all_files:
+        search = _re_configuration_file.search(file_name)
+        if search is not None:
+            v = search.groups()[0]
+            configuration_files_map[v] = file_name
+    available_versions = sorted(configuration_files_map.keys())
+
+    # Defaults to FULL_CONFIGURATION_FILE and then try to look at some newer versions.
+    configuration_file = FULL_CONFIGURATION_FILE
+    transformers_version = version.parse(__version__)
+    for v in available_versions:
+        if version.parse(v) <= transformers_version:
+            configuration_file = configuration_files_map[v]
+        else:
+            # No point going further since the versions are sorted.
+            break
+
+    return configuration_file
+
+
+PretrainedConfig.push_to_hub = copy_func(PretrainedConfig.push_to_hub)
+PretrainedConfig.push_to_hub.__doc__ = PretrainedConfig.push_to_hub.__doc__.format(
+    object="config", object_class="AutoConfig", object_files="configuration file"
+)

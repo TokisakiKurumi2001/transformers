@@ -47,7 +47,7 @@ from transformers.utils.versions import require_version
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.9.0.dev0")
+check_min_version("4.13.0.dev0")
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/token-classification/requirements.txt")
 
@@ -122,6 +122,13 @@ class DataTrainingArguments:
     preprocessing_num_workers: Optional[int] = field(
         default=None,
         metadata={"help": "The number of processes to use for the preprocessing."},
+    )
+    max_seq_length: int = field(
+        default=None,
+        metadata={
+            "help": "The maximum total input sequence length after tokenization. If set, sequences longer "
+            "than this will be truncated, sequences shorter will be padded."
+        },
     )
     pad_to_max_length: bool = field(
         default=False,
@@ -296,6 +303,14 @@ def main():
         label_to_id = {l: i for i, l in enumerate(label_list)}
     num_labels = len(label_list)
 
+    # Map that sends B-Xxx label to its I-Xxx counterpart
+    b_to_i_label = []
+    for idx, label in enumerate(label_list):
+        if label.startswith("B-") and label.replace("B-", "I-") in label_list:
+            b_to_i_label.append(label_list.index(label.replace("B-", "I-")))
+        else:
+            b_to_i_label.append(idx)
+
     # Load pretrained model and tokenizer
     #
     # Distributed training:
@@ -358,6 +373,7 @@ def main():
             examples[text_column_name],
             padding=padding,
             truncation=True,
+            max_length=data_args.max_seq_length,
             # We use this argument because the texts in our dataset are lists of words (with a label for each word).
             is_split_into_words=True,
         )
@@ -377,7 +393,10 @@ def main():
                 # For the other tokens in a word, we set the label to either the current label or -100, depending on
                 # the label_all_tokens flag.
                 else:
-                    label_ids.append(label_to_id[label[word_idx]] if data_args.label_all_tokens else -100)
+                    if data_args.label_all_tokens:
+                        label_ids.append(b_to_i_label[label_to_id[label[word_idx]]])
+                    else:
+                        label_ids.append(-100)
                 previous_word_idx = word_idx
 
             labels.append(label_ids)
@@ -390,13 +409,14 @@ def main():
         train_dataset = raw_datasets["train"]
         if data_args.max_train_samples is not None:
             train_dataset = train_dataset.select(range(data_args.max_train_samples))
-        train_dataset = train_dataset.map(
-            tokenize_and_align_labels,
-            batched=True,
-            num_proc=data_args.preprocessing_num_workers,
-            load_from_cache_file=not data_args.overwrite_cache,
-            desc="Running tokenizer on train dataset",
-        )
+        with training_args.main_process_first(desc="train dataset map pre-processing"):
+            train_dataset = train_dataset.map(
+                tokenize_and_align_labels,
+                batched=True,
+                num_proc=data_args.preprocessing_num_workers,
+                load_from_cache_file=not data_args.overwrite_cache,
+                desc="Running tokenizer on train dataset",
+            )
 
     if training_args.do_eval:
         if "validation" not in raw_datasets:
@@ -404,13 +424,14 @@ def main():
         eval_dataset = raw_datasets["validation"]
         if data_args.max_eval_samples is not None:
             eval_dataset = eval_dataset.select(range(data_args.max_eval_samples))
-        eval_dataset = eval_dataset.map(
-            tokenize_and_align_labels,
-            batched=True,
-            num_proc=data_args.preprocessing_num_workers,
-            load_from_cache_file=not data_args.overwrite_cache,
-            desc="Running tokenizer on validation dataset",
-        )
+        with training_args.main_process_first(desc="validation dataset map pre-processing"):
+            eval_dataset = eval_dataset.map(
+                tokenize_and_align_labels,
+                batched=True,
+                num_proc=data_args.preprocessing_num_workers,
+                load_from_cache_file=not data_args.overwrite_cache,
+                desc="Running tokenizer on validation dataset",
+            )
 
     if training_args.do_predict:
         if "test" not in raw_datasets:
@@ -418,13 +439,14 @@ def main():
         predict_dataset = raw_datasets["test"]
         if data_args.max_predict_samples is not None:
             predict_dataset = predict_dataset.select(range(data_args.max_predict_samples))
-        predict_dataset = predict_dataset.map(
-            tokenize_and_align_labels,
-            batched=True,
-            num_proc=data_args.preprocessing_num_workers,
-            load_from_cache_file=not data_args.overwrite_cache,
-            desc="Running tokenizer on prediction dataset",
-        )
+        with training_args.main_process_first(desc="prediction dataset map pre-processing"):
+            predict_dataset = predict_dataset.map(
+                tokenize_and_align_labels,
+                batched=True,
+                num_proc=data_args.preprocessing_num_workers,
+                load_from_cache_file=not data_args.overwrite_cache,
+                desc="Running tokenizer on prediction dataset",
+            )
 
     # Data collator
     data_collator = DataCollatorForTokenClassification(tokenizer, pad_to_multiple_of=8 if training_args.fp16 else None)
@@ -531,17 +553,19 @@ def main():
                 for prediction in true_predictions:
                     writer.write(" ".join(prediction) + "\n")
 
-    if training_args.push_to_hub:
-        kwargs = {"finetuned_from": model_args.model_name_or_path, "tasks": "token-classification"}
-        if data_args.dataset_name is not None:
-            kwargs["dataset_tags"] = data_args.dataset_name
-            if data_args.dataset_config_name is not None:
-                kwargs["dataset_args"] = data_args.dataset_config_name
-                kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
-            else:
-                kwargs["dataset"] = data_args.dataset_name
+    kwargs = {"finetuned_from": model_args.model_name_or_path, "tasks": "token-classification"}
+    if data_args.dataset_name is not None:
+        kwargs["dataset_tags"] = data_args.dataset_name
+        if data_args.dataset_config_name is not None:
+            kwargs["dataset_args"] = data_args.dataset_config_name
+            kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
+        else:
+            kwargs["dataset"] = data_args.dataset_name
 
+    if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
+    else:
+        trainer.create_model_card(**kwargs)
 
 
 def _mp_fn(index):

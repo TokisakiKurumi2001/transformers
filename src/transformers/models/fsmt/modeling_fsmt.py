@@ -36,6 +36,7 @@ from torch import Tensor, nn
 from torch.nn import CrossEntropyLoss, LayerNorm
 
 from ...activations import ACT2FN
+from ...deepspeed import is_deepspeed_zero3_enabled
 from ...file_utils import (
     add_code_sample_docstrings,
     add_end_docstrings,
@@ -658,11 +659,14 @@ class FSMTDecoder(nn.Module):
             [DecoderLayer(config) for _ in range(config.decoder_layers)]
         )  # type: List[DecoderLayer]
 
-        self.output_projection = nn.Linear(
-            self.embed_tokens.weight.shape[1],
-            self.embed_tokens.weight.shape[0],
-            bias=False,
-        )
+        if is_deepspeed_zero3_enabled():
+            import deepspeed
+
+            with deepspeed.zero.GatheredParameters(self.embed_tokens.weight, modifier_rank=None):
+                embed_tokens_weight_shape = self.embed_tokens.weight.shape
+        else:
+            embed_tokens_weight_shape = self.embed_tokens.weight.shape
+        self.output_projection = nn.Linear(embed_tokens_weight_shape[1], embed_tokens_weight_shape[0], bias=False)
         self.output_projection.weight = self.embed_tokens.weight
 
     def forward(
@@ -999,11 +1003,12 @@ class FSMTModel(PretrainedFSMTModel):
         self.encoder = FSMTEncoder(config, encoder_embed_tokens)
         self.decoder = FSMTDecoder(config, decoder_embed_tokens)
 
-        self.init_weights()
+        # Initialize weights and apply final processing
+        self.post_init()
 
     @add_start_docstrings_to_model_forward(FSMT_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        tokenizer_class=_TOKENIZER_FOR_DOC,
+        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=Seq2SeqModelOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1127,19 +1132,6 @@ class FSMTForConditionalGeneration(PretrainedFSMTModel):
         base_model = FSMTModel(config)
         self.model = base_model
 
-    def resize_token_embeddings(self, new_num_tokens: int) -> nn.Embedding:
-        new_embeddings = super().resize_token_embeddings(new_num_tokens)
-        self.model.encoder.embed_tokens = new_embeddings
-
-        new_embeddings = super().resize_token_embeddings(new_num_tokens)
-        self.model.decoder.embed_tokens = new_embeddings
-
-        # XXX: this is not quite correct, as we have 2 different `new_embeddings`, and
-        # only one return value is expected. Needs to be redesigned in the core to support dual dicts
-        raise NotImplementedError("this method needs re-thinking for models with 2 separate dictionaries")
-
-        return new_embeddings
-
     @add_start_docstrings_to_model_forward(FSMT_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=Seq2SeqLMOutput, config_class=_CONFIG_FOR_DOC)
     @add_end_docstrings(FSMT_GENERATION_EXAMPLE)
@@ -1257,6 +1249,9 @@ class FSMTForConditionalGeneration(PretrainedFSMTModel):
     def get_output_embeddings(self):
         return self.model.decoder.embed_tokens
 
+    def set_output_embeddings(self, value):
+        self.model.decoder.embed_tokens = value
+
 
 class SinusoidalPositionalEmbedding(nn.Embedding):
     """
@@ -1278,8 +1273,8 @@ class SinusoidalPositionalEmbedding(nn.Embedding):
             # in ___init__
             super().__init__(num_positions, embedding_dim, padding_idx, _weight=weight)
         else:
-            # in forward
-            weight = weight.to(self.weight.device)
+            # in forward put the weights on the correct dtype and device of the param
+            weight = weight.to(dtype=self.weight.dtype, device=self.weight.device)
             self.weight = nn.Parameter(weight)
         self.weight.detach_()
         self.weight.requires_grad = False

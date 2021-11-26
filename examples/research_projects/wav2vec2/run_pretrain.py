@@ -50,9 +50,6 @@ class ModelArguments:
     freeze_feature_extractor: Optional[bool] = field(
         default=True, metadata={"help": "Whether to freeze the feature extractor layers of the model."}
     )
-    gradient_checkpointing: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to freeze the feature extractor layers of the model."}
-    )
     verbose_logging: Optional[bool] = field(
         default=False,
         metadata={"help": "Whether to log verbose messages or not."},
@@ -117,6 +114,12 @@ class DataTrainingArguments:
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached preprocessed datasets or not."}
     )
+    validation_split_percentage: Optional[int] = field(
+        default=1,
+        metadata={
+            "help": "The percentage of the train set used as validation set in case there's no validation split"
+        },
+    )
     preprocessing_num_workers: Optional[int] = field(
         default=None,
         metadata={"help": "The number of processes to use for the preprocessing."},
@@ -172,12 +175,33 @@ class DataCollatorForWav2Vec2Pretraining:
         )
         mask_indices_seq_length = self.model._get_feat_extract_output_lengths(batch["input_values"].shape[-1])
 
+        batch_size = batch["input_values"].shape[0]
+
+        # make sure that no loss is computed on padded inputs
+        if batch["attention_mask"] is not None:
+            # compute real output lengths according to convolution formula
+            output_lengths = self.model._get_feat_extract_output_lengths(batch["attention_mask"].sum(-1)).to(
+                torch.long
+            )
+
+            attention_mask = torch.zeros(
+                (batch_size, mask_indices_seq_length), dtype=torch.long, device=batch["input_values"].device
+            )
+
+            # these two operations makes sure that all values
+            # before the output lengths indices are attended to
+            attention_mask[
+                (torch.arange(attention_mask.shape[0], device=batch["input_values"].device), output_lengths - 1)
+            ] = 1
+            attention_mask = attention_mask.flip([-1]).cumsum(-1).flip([-1]).bool()
+
         # sample randomly masked indices
         batch["mask_time_indices"] = _compute_mask_indices(
-            (batch["input_values"].shape[0], mask_indices_seq_length),
+            (batch_size, mask_indices_seq_length),
             self.model.config.mask_time_prob,
             self.model.config.mask_time_length,
             device=batch["input_values"].device,
+            attention_mask=attention_mask,
             min_masks=2,
         )
 
@@ -340,7 +364,7 @@ def main():
     config = Wav2Vec2Config.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
-        gradient_checkpointing=model_args.gradient_checkpointing,
+        gradient_checkpointing=training_args.gradient_checkpointing,
     )
 
     if not config.do_stable_layer_norm or config.feat_extract_norm != "layer":

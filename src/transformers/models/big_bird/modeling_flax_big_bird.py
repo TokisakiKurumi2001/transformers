@@ -21,7 +21,6 @@ import flax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import jaxlib.xla_extension as jax_xla
 from flax.core.frozen_dict import FrozenDict
 from flax.linen.attention import dot_product_attention_weights
 from jax import lax
@@ -59,28 +58,28 @@ class FlaxBigBirdForPreTrainingOutput(ModelOutput):
     Output type of :class:`~transformers.BigBirdForPreTraining`.
 
     Args:
-        prediction_logits (:obj:`jax_xla.DeviceArray` of shape :obj:`(batch_size, sequence_length, config.vocab_size)`):
+        prediction_logits (:obj:`jnp.ndarray` of shape :obj:`(batch_size, sequence_length, config.vocab_size)`):
             Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        seq_relationship_logits (:obj:`jax_xla.DeviceArray` of shape :obj:`(batch_size, 2)`):
+        seq_relationship_logits (:obj:`jnp.ndarray` of shape :obj:`(batch_size, 2)`):
             Prediction scores of the next sequence prediction (classification) head (scores of True/False continuation
             before SoftMax).
-        hidden_states (:obj:`tuple(jax_xla.DeviceArray)`, `optional`, returned when ``output_hidden_states=True`` is passed or when ``config.output_hidden_states=True``):
-            Tuple of :obj:`jax_xla.DeviceArray` (one for the output of the embeddings + one for the output of each
-            layer) of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+        hidden_states (:obj:`tuple(jnp.ndarray)`, `optional`, returned when ``output_hidden_states=True`` is passed or when ``config.output_hidden_states=True``):
+            Tuple of :obj:`jnp.ndarray` (one for the output of the embeddings + one for the output of each layer) of
+            shape :obj:`(batch_size, sequence_length, hidden_size)`.
 
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(jax_xla.DeviceArray)`, `optional`, returned when ``output_attentions=True`` is passed or when ``config.output_attentions=True``):
-            Tuple of :obj:`jax_xla.DeviceArray` (one for each layer) of shape :obj:`(batch_size, num_heads,
-            sequence_length, sequence_length)`.
+        attentions (:obj:`tuple(jnp.ndarray)`, `optional`, returned when ``output_attentions=True`` is passed or when ``config.output_attentions=True``):
+            Tuple of :obj:`jnp.ndarray` (one for each layer) of shape :obj:`(batch_size, num_heads, sequence_length,
+            sequence_length)`.
 
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
     """
 
-    prediction_logits: jax_xla.DeviceArray = None
-    seq_relationship_logits: jax_xla.DeviceArray = None
-    hidden_states: Optional[Tuple[jax_xla.DeviceArray]] = None
-    attentions: Optional[Tuple[jax_xla.DeviceArray]] = None
+    prediction_logits: jnp.ndarray = None
+    seq_relationship_logits: jnp.ndarray = None
+    hidden_states: Optional[Tuple[jnp.ndarray]] = None
+    attentions: Optional[Tuple[jnp.ndarray]] = None
 
 
 @flax.struct.dataclass
@@ -89,30 +88,30 @@ class FlaxBigBirdForQuestionAnsweringModelOutput(ModelOutput):
     Base class for outputs of question answering models.
 
     Args:
-        start_logits (:obj:`jax_xla.DeviceArray` of shape :obj:`(batch_size, sequence_length)`):
+        start_logits (:obj:`jnp.ndarray` of shape :obj:`(batch_size, sequence_length)`):
             Span-start scores (before SoftMax).
-        end_logits (:obj:`jax_xla.DeviceArray` of shape :obj:`(batch_size, sequence_length)`):
+        end_logits (:obj:`jnp.ndarray` of shape :obj:`(batch_size, sequence_length)`):
             Span-end scores (before SoftMax).
-        pooled_output (:obj:`jax_xla.DeviceArray` of shape :obj:`(batch_size, hidden_size)`):
+        pooled_output (:obj:`jnp.ndarray` of shape :obj:`(batch_size, hidden_size)`):
             pooled_output returned by FlaxBigBirdModel.
-        hidden_states (:obj:`tuple(jax_xla.DeviceArray)`, `optional`, returned when ``output_hidden_states=True`` is passed or when ``config.output_hidden_states=True``):
-            Tuple of :obj:`jax_xla.DeviceArray` (one for the output of the embeddings + one for the output of each
-            layer) of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+        hidden_states (:obj:`tuple(jnp.ndarray)`, `optional`, returned when ``output_hidden_states=True`` is passed or when ``config.output_hidden_states=True``):
+            Tuple of :obj:`jnp.ndarray` (one for the output of the embeddings + one for the output of each layer) of
+            shape :obj:`(batch_size, sequence_length, hidden_size)`.
 
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(jax_xla.DeviceArray)`, `optional`, returned when ``output_attentions=True`` is passed or when ``config.output_attentions=True``):
-            Tuple of :obj:`jax_xla.DeviceArray` (one for each layer) of shape :obj:`(batch_size, num_heads,
-            sequence_length, sequence_length)`.
+        attentions (:obj:`tuple(jnp.ndarray)`, `optional`, returned when ``output_attentions=True`` is passed or when ``config.output_attentions=True``):
+            Tuple of :obj:`jnp.ndarray` (one for each layer) of shape :obj:`(batch_size, num_heads, sequence_length,
+            sequence_length)`.
 
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
     """
 
-    start_logits: jax_xla.DeviceArray = None
-    end_logits: jax_xla.DeviceArray = None
-    pooled_output: jax_xla.DeviceArray = None
-    hidden_states: Optional[Tuple[jax_xla.DeviceArray]] = None
-    attentions: Optional[Tuple[jax_xla.DeviceArray]] = None
+    start_logits: jnp.ndarray = None
+    end_logits: jnp.ndarray = None
+    pooled_output: jnp.ndarray = None
+    hidden_states: Optional[Tuple[jnp.ndarray]] = None
+    attentions: Optional[Tuple[jnp.ndarray]] = None
 
 
 BIG_BIRD_START_DOCSTRING = r"""
@@ -137,6 +136,18 @@ BIG_BIRD_START_DOCSTRING = r"""
             Initializing with a config file does not load the weights associated with the model, only the
             configuration. Check out the :meth:`~transformers.FlaxPreTrainedModel.from_pretrained` method to load the
             model weights.
+        dtype (:obj:`jax.numpy.dtype`, `optional`, defaults to :obj:`jax.numpy.float32`):
+            The data type of the computation. Can be one of :obj:`jax.numpy.float32`, :obj:`jax.numpy.float16` (on
+            GPUs) and :obj:`jax.numpy.bfloat16` (on TPUs).
+
+            This can be used to enable mixed-precision training or half-precision inference on GPUs or TPUs. If
+            specified all the computation will be performed with the given ``dtype``.
+
+            **Note that this only specifies the dtype of the computation and does not influence the dtype of model
+            parameters.**
+
+            If you wish to change the dtype of the model parameters, see
+            :meth:`~transformers.FlaxPreTrainedModel.to_fp16` and :meth:`~transformers.FlaxPreTrainedModel.to_bf16`.
 """
 
 BIG_BIRD_INPUTS_DOCSTRING = r"""
@@ -185,19 +196,16 @@ class FlaxBigBirdEmbeddings(nn.Module):
             self.config.vocab_size,
             self.config.hidden_size,
             embedding_init=jax.nn.initializers.normal(stddev=self.config.initializer_range),
-            dtype=self.dtype,
         )
         self.position_embeddings = nn.Embed(
             self.config.max_position_embeddings,
             self.config.hidden_size,
             embedding_init=jax.nn.initializers.normal(stddev=self.config.initializer_range),
-            dtype=self.dtype,
         )
         self.token_type_embeddings = nn.Embed(
             self.config.type_vocab_size,
             self.config.hidden_size,
             embedding_init=jax.nn.initializers.normal(stddev=self.config.initializer_range),
-            dtype=self.dtype,
         )
         self.LayerNorm = nn.LayerNorm(epsilon=self.config.layer_norm_eps, dtype=self.dtype)
         self.dropout = nn.Dropout(rate=self.config.hidden_dropout_prob)
@@ -235,17 +243,17 @@ class FlaxBigBirdSelfAttention(nn.Module):
         self.query = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
         self.key = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
         self.value = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
 
     def __call__(self, hidden_states, attention_mask, deterministic=True, output_attentions: bool = False):
@@ -306,19 +314,19 @@ class FlaxBigBirdBlockSparseAttention(nn.Module):
             self.config.hidden_size,
             dtype=self.dtype,
             use_bias=self.config.use_bias,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
         self.key = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
             use_bias=self.config.use_bias,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
         self.value = nn.Dense(
             self.config.hidden_size,
             dtype=self.dtype,
             use_bias=self.config.use_bias,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
         )
 
     @staticmethod
@@ -1075,7 +1083,7 @@ class FlaxBigBirdSelfOutput(nn.Module):
     def setup(self):
         self.dense = nn.Dense(
             self.config.hidden_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
         self.LayerNorm = nn.LayerNorm(epsilon=self.config.layer_norm_eps, dtype=self.dtype)
@@ -1132,7 +1140,7 @@ class FlaxBigBirdIntermediate(nn.Module):
     def setup(self):
         self.dense = nn.Dense(
             self.config.intermediate_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
         self.activation = ACT2FN[self.config.hidden_act]
@@ -1151,7 +1159,7 @@ class FlaxBigBirdOutput(nn.Module):
     def setup(self):
         self.dense = nn.Dense(
             self.config.hidden_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
         self.dropout = nn.Dropout(rate=self.config.hidden_dropout_prob)
@@ -1302,7 +1310,8 @@ class FlaxBigBirdLMPredictionHead(nn.Module):
         else:
             hidden_states = self.decoder(hidden_states)
 
-        hidden_states += self.bias
+        bias = jnp.asarray(self.bias, self.dtype)
+        hidden_states += bias
         return hidden_states
 
 
@@ -1432,7 +1441,7 @@ class FlaxBigBirdModule(nn.Module):
         self.encoder = FlaxBigBirdEncoder(self.config, dtype=self.dtype)
         self.pooler = nn.Dense(
             self.config.hidden_size,
-            kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
             dtype=self.dtype,
         )
 
@@ -1568,7 +1577,7 @@ FLAX_BIG_BIRD_FOR_PRETRAINING_DOCSTRING = """
         >>> tokenizer = BigBirdTokenizer.from_pretrained('google/bigbird-roberta-base')
         >>> model = FlaxBigBirdForPreTraining.from_pretrained('google/bigbird-roberta-base')
 
-        >>> inputs = tokenizer("Hello, my dog is cute", return_tensors="jax")
+        >>> inputs = tokenizer("Hello, my dog is cute", return_tensors="np")
         >>> outputs = model(**inputs)
 
         >>> prediction_logits = outputs.prediction_logits
@@ -1654,7 +1663,12 @@ class FlaxBigBirdClassificationHead(nn.Module):
 
     def setup(self):
         self.dense = nn.Dense(self.config.hidden_size, dtype=self.dtype)
-        self.dropout = nn.Dropout(self.config.hidden_dropout_prob)
+        classifier_dropout = (
+            self.config.classifier_dropout
+            if self.config.classifier_dropout is not None
+            else self.config.hidden_dropout_prob
+        )
+        self.dropout = nn.Dropout(classifier_dropout)
         self.out_proj = nn.Dense(self.config.num_labels, dtype=self.dtype)
 
     def __call__(self, features, deterministic=True):
@@ -1831,7 +1845,12 @@ class FlaxBigBirdForTokenClassificationModule(nn.Module):
 
     def setup(self):
         self.bert = FlaxBigBirdModule(config=self.config, dtype=self.dtype, add_pooling_layer=False)
-        self.dropout = nn.Dropout(rate=self.config.hidden_dropout_prob)
+        classifier_dropout = (
+            self.config.classifier_dropout
+            if self.config.classifier_dropout is not None
+            else self.config.hidden_dropout_prob
+        )
+        self.dropout = nn.Dropout(rate=classifier_dropout)
         self.classifier = nn.Dense(self.config.num_labels, dtype=self.dtype)
 
     def __call__(
@@ -2020,6 +2039,7 @@ class FlaxBigBirdForQuestionAnswering(FlaxBigBirdPreTrainedModel):
             if token_type_ids is None:
                 token_type_ids = (~logits_mask).astype("i4")
             logits_mask = jnp.expand_dims(logits_mask, axis=2)
+            logits_mask = jax.ops.index_update(logits_mask, jax.ops.index[:, 0], False)
 
         # init input tensors if not passed
         if token_type_ids is None:
