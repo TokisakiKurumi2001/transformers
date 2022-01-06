@@ -239,6 +239,9 @@ TF_MODEL_FOR_SEQ_TO_SEQ_CAUSAL_LM_MAPPING = None
 TF_MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING = None
 
 
+TF_MODEL_FOR_TABLE_QUESTION_ANSWERING_MAPPING = None
+
+
 TF_MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING = None
 
 
@@ -345,6 +348,18 @@ class TFAutoModelForSeq2SeqLM:
 
 
 class TFAutoModelForSequenceClassification:
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        requires_backends(cls, ["tf"])
+
+    def call(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+
+class TFAutoModelForTableQuestionAnswering:
     def __init__(self, *args, **kwargs):
         requires_backends(self, ["tf"])
 
@@ -678,6 +693,57 @@ class TFCamembertForTokenClassification:
 
 
 class TFCamembertModel:
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        requires_backends(cls, ["tf"])
+
+    def call(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+
+TF_CLIP_PRETRAINED_MODEL_ARCHIVE_LIST = None
+
+
+class TFCLIPModel:
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        requires_backends(cls, ["tf"])
+
+    def call(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+
+class TFCLIPPreTrainedModel:
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        requires_backends(cls, ["tf"])
+
+    def call(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+
+class TFCLIPTextModel:
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        requires_backends(cls, ["tf"])
+
+    def call(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+
+class TFCLIPVisionModel:
     def __init__(self, *args, **kwargs):
         requires_backends(self, ["tf"])
 
@@ -2477,6 +2543,69 @@ class TFT5Model:
 
 
 class TFT5PreTrainedModel:
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        requires_backends(cls, ["tf"])
+
+    def call(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+
+TF_TAPAS_PRETRAINED_MODEL_ARCHIVE_LIST = None
+
+
+class TFTapasForMaskedLM:
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        requires_backends(cls, ["tf"])
+
+    def call(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+
+class TFTapasForQuestionAnswering:
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        requires_backends(cls, ["tf"])
+
+    def call(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+
+class TFTapasForSequenceClassification:
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        requires_backends(cls, ["tf"])
+
+    def call(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+
+class TFTapasModel:
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        requires_backends(cls, ["tf"])
+
+    def call(self, *args, **kwargs):
+        requires_backends(self, ["tf"])
+
+
+class TFTapasPreTrainedModel:
     def __init__(self, *args, **kwargs):
         requires_backends(self, ["tf"])
 
