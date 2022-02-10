@@ -171,9 +171,10 @@ class OnnxConfigWithPastTestCaseV2(TestCase):
 PYTORCH_EXPORT_MODELS = {
     ("albert", "hf-internal-testing/tiny-albert"),
     ("bert", "bert-base-cased"),
+    ("ibert", "kssteven/ibert-roberta-base"),
     ("camembert", "camembert-base"),
     ("distilbert", "distilbert-base-cased"),
-    # ("longFormer", "longformer-base-4096"),
+    ("electra", "google/electra-base-generator"),
     ("roberta", "roberta-base"),
     ("xlm-roberta", "xlm-roberta-base"),
     ("layoutlm", "microsoft/layoutlm-base-uncased"),
