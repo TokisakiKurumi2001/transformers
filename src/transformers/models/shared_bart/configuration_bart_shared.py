@@ -27,13 +27,14 @@ from ...utils import logging
 
 logger = logging.get_logger(__name__)
 
-BART_PRETRAINED_CONFIG_ARCHIVE_MAP = {
+BART_SHARED_PRETRAINED_CONFIG_ARCHIVE_MAP = {
+    "facebook/bart-base": "https://huggingface.co/facebook/bart-base/resolve/main/config.json"
     "facebook/bart-large": "https://huggingface.co/facebook/bart-large/resolve/main/config.json",
     # See all BART models at https://huggingface.co/models?filter=bart
 }
 
 
-class BartConfig(PretrainedConfig):
+class BartSharedConfig(PretrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`BartModel`]. It is used to instantiate a BART
     model according to the specified arguments, defining the model architecture. Instantiating a configuration with the
@@ -108,7 +109,7 @@ class BartConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-    model_type = "bart"
+    model_type = "bart_shared"
     keys_to_ignore_at_inference = ["past_key_values"]
     attribute_map = {"num_attention_heads": "encoder_attention_heads", "hidden_size": "d_model"}
 
@@ -183,7 +184,7 @@ class BartConfig(PretrainedConfig):
             )
 
 
-class BartOnnxConfig(OnnxSeq2SeqConfigWithPast):
+class BartSharedOnnxConfig(OnnxSeq2SeqConfigWithPast):
     @property
     def inputs(self) -> Mapping[str, Mapping[int, str]]:
         if self.task in ["default", "seq2seq-lm"]:
