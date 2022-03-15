@@ -163,6 +163,7 @@ _import_structure = {
         "AutoTokenizer",
     ],
     "models.bart": ["BartConfig", "BartTokenizer"],
+    "models.shared_bart": [],
     "models.barthez": [],
     "models.bartpho": [],
     "models.beit": ["BEIT_PRETRAINED_CONFIG_ARCHIVE_MAP", "BeitConfig"],
