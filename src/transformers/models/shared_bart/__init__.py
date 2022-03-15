@@ -29,7 +29,7 @@ if is_tokenizers_available():
     _import_structure["tokenization_bart_fast"] = ["BartTokenizerFast"]
 
 if is_torch_available():
-    _import_structure["modeling_bart"] = [
+    _import_structure["modeling_bart_shared"] = [
         "BART_SHARED_PRETRAINED_MODEL_ARCHIVE_LIST",
         "BartSharedForCausalLM",
         "BartSharedForConditionalGeneration",
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
         from .tokenization_bart_fast import BartTokenizerFast
 
     if is_torch_available():
-        from .modeling_bart import (
+        from .modeling_bart_shared import (
             BART_SHARED_PRETRAINED_MODEL_ARCHIVE_LIST,
             BartSharedForCausalLM,
             BartSharedForConditionalGeneration,
