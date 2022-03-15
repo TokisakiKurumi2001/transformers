@@ -710,6 +710,18 @@ if is_torch_available():
             "PretrainedBartModel",
         ]
     )
+    _import_structure["models.shared_bart"].extend(
+        [
+            "BART_SHARED_PRETRAINED_MODEL_ARCHIVE_LIST",
+            "BartSharedForCausalLM",
+            "BartSharedForConditionalGeneration",
+            "BartSharedForQuestionAnswering",
+            "BartSharedForSequenceClassification",
+            "BartSharedModel",
+            "BartSharedPretrainedModel",
+            "PretrainedBartSharedModel",
+        ]
+    )
     _import_structure["models.beit"].extend(
         [
             "BEIT_PRETRAINED_MODEL_ARCHIVE_LIST",
@@ -2948,6 +2960,16 @@ if TYPE_CHECKING:
             BartModel,
             BartPretrainedModel,
             PretrainedBartModel,
+        )
+        from .models.shared_bart import (
+            BART_SHARED_PRETRAINED_MODEL_ARCHIVE_LIST,
+            BartSharedForCausalLM,
+            BartSharedForConditionalGeneration,
+            BartSharedForQuestionAnswering,
+            BartSharedForSequenceClassification,
+            BartSharedModel,
+            BartSharedPretrainedModel,
+            PretrainedBartSharedModel,
         )
         from .models.beit import (
             BEIT_PRETRAINED_MODEL_ARCHIVE_LIST,
