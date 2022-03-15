@@ -21,7 +21,7 @@ from ...file_utils import _LazyModule, is_flax_available, is_tf_available, is_to
 
 
 _import_structure = {
-    "configuration_bart": ["BART_PRETRAINED_CONFIG_ARCHIVE_MAP", "BartConfig", "BartOnnxConfig"],
+    "configuration_bart_shared": ["BART_SHARED_PRETRAINED_CONFIG_ARCHIVE_MAP", "BartSharedConfig", "BartSharedOnnxConfig"],
     "tokenization_bart": ["BartTokenizer"],
 }
 
@@ -41,7 +41,7 @@ if is_torch_available():
     ]
 
 if TYPE_CHECKING:
-    from .configuration_bart import BART_PRETRAINED_CONFIG_ARCHIVE_MAP, BartConfig, BartOnnxConfig
+    from .configuration_bart_shared import BART_SHARED_PRETRAINED_CONFIG_ARCHIVE_MAP, BartSharedConfig, BartSharedOnnxConfig
     from .tokenization_bart import BartTokenizer
 
     if is_tokenizers_available():
