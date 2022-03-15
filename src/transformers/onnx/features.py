@@ -1,7 +1,7 @@
 from functools import partial, reduce
-from typing import Callable, Dict, Optional, Tuple, Type
+from typing import Callable, Dict, Optional, Tuple, Type, Union
 
-from .. import PretrainedConfig, is_torch_available
+from .. import PretrainedConfig, PreTrainedModel, TFPreTrainedModel, is_tf_available, is_torch_available
 from ..models.albert import AlbertOnnxConfig
 from ..models.bart import BartOnnxConfig
 from ..models.bert import BertOnnxConfig
@@ -12,10 +12,12 @@ from ..models.gpt2 import GPT2OnnxConfig
 from ..models.gpt_neo import GPTNeoOnnxConfig
 from ..models.ibert import IBertOnnxConfig
 from ..models.layoutlm import LayoutLMOnnxConfig
+from ..models.m2m_100 import M2M100OnnxConfig
 from ..models.marian import MarianOnnxConfig
 from ..models.mbart import MBartOnnxConfig
 from ..models.roberta import RobertaOnnxConfig
 from ..models.t5 import T5OnnxConfig
+from ..models.vit import ViTOnnxConfig
 from ..models.xlm_roberta import XLMRobertaOnnxConfig
 from ..utils import logging
 from .config import OnnxConfig
@@ -24,10 +26,10 @@ from .config import OnnxConfig
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 if is_torch_available():
-    from transformers import PreTrainedModel
     from transformers.models.auto import (
         AutoModel,
         AutoModelForCausalLM,
+        AutoModelForImageClassification,
         AutoModelForMaskedLM,
         AutoModelForMultipleChoice,
         AutoModelForQuestionAnswering,
@@ -35,9 +37,20 @@ if is_torch_available():
         AutoModelForSequenceClassification,
         AutoModelForTokenClassification,
     )
-else:
+if is_tf_available():
+    from transformers.models.auto import (
+        TFAutoModel,
+        TFAutoModelForCausalLM,
+        TFAutoModelForMaskedLM,
+        TFAutoModelForMultipleChoice,
+        TFAutoModelForQuestionAnswering,
+        TFAutoModelForSeq2SeqLM,
+        TFAutoModelForSequenceClassification,
+        TFAutoModelForTokenClassification,
+    )
+if not is_torch_available() and not is_tf_available():
     logger.warning(
-        "The ONNX export features are only supported for PyTorch, you will not be able to export models without it."
+        "The ONNX export features are only supported for PyTorch or TensorFlow. You will not be able to export models without one of these libraries installed."
     )
 
 
@@ -69,6 +82,8 @@ def supported_features_mapping(
 
 
 class FeaturesManager:
+    _TASKS_TO_AUTOMODELS = {}
+    _TASKS_TO_TF_AUTOMODELS = {}
     if is_torch_available():
         _TASKS_TO_AUTOMODELS = {
             "default": AutoModel,
@@ -79,9 +94,19 @@ class FeaturesManager:
             "token-classification": AutoModelForTokenClassification,
             "multiple-choice": AutoModelForMultipleChoice,
             "question-answering": AutoModelForQuestionAnswering,
+            "image-classification": AutoModelForImageClassification,
         }
-    else:
-        _TASKS_TO_AUTOMODELS = {}
+    if is_tf_available():
+        _TASKS_TO_TF_AUTOMODELS = {
+            "default": TFAutoModel,
+            "masked-lm": TFAutoModelForMaskedLM,
+            "causal-lm": TFAutoModelForCausalLM,
+            "seq2seq-lm": TFAutoModelForSeq2SeqLM,
+            "sequence-classification": TFAutoModelForSequenceClassification,
+            "token-classification": TFAutoModelForTokenClassification,
+            "multiple-choice": TFAutoModelForMultipleChoice,
+            "question-answering": TFAutoModelForQuestionAnswering,
+        }
 
     # Set of model topologies we support associated to the features supported by each topology and the factory
     _SUPPORTED_MODEL_TYPE = {
@@ -163,6 +188,9 @@ class FeaturesManager:
             "causal-lm-with-past",
             onnx_config_cls=MarianOnnxConfig,
         ),
+        "m2m-100": supported_features_mapping(
+            "default", "default-with-past", "seq2seq-lm", "seq2seq-lm-with-past", onnx_config_cls=M2M100OnnxConfig
+        ),
         "roberta": supported_features_mapping(
             "default",
             "masked-lm",
@@ -219,6 +247,7 @@ class FeaturesManager:
             "question-answering",
             onnx_config_cls=ElectraOnnxConfig,
         ),
+        "vit": supported_features_mapping("default", "image-classification", onnx_config_cls=ViTOnnxConfig),
     }
 
     AVAILABLE_FEATURES = sorted(reduce(lambda s1, s2: s1 | s2, (v.keys() for v in _SUPPORTED_MODEL_TYPE.values())))
@@ -228,11 +257,13 @@ class FeaturesManager:
         model_type: str, model_name: Optional[str] = None
     ) -> Dict[str, Callable[[PretrainedConfig], OnnxConfig]]:
         """
-        Try to retrieve the feature -> OnnxConfig constructor map from the model type.
+        Tries to retrieve the feature -> OnnxConfig constructor map from the model type.
 
         Args:
-            model_type: The model type to retrieve the supported features for.
-            model_name: The name attribute of the model object, only used for the exception message.
+            model_type (`str`):
+                The model type to retrieve the supported features for.
+            model_name (`str`, *optional*):
+                The name attribute of the model object, only used for the exception message.
 
         Returns:
             The dictionary mapping each feature to a corresponding OnnxConfig constructor.
@@ -252,41 +283,79 @@ class FeaturesManager:
         return feature.replace("-with-past", "")
 
     @staticmethod
-    def get_model_class_for_feature(feature: str) -> Type:
+    def _validate_framework_choice(framework: str):
         """
-        Attempt to retrieve an AutoModel class from a feature name.
+        Validates if the framework requested for the export is both correct and available, otherwise throws an
+        exception.
+        """
+        if framework not in ["pt", "tf"]:
+            raise ValueError(
+                f"Only two frameworks are supported for ONNX export: pt or tf, but {framework} was provided."
+            )
+        elif framework == "pt" and not is_torch_available():
+            raise RuntimeError("Cannot export model to ONNX using PyTorch because no PyTorch package was found.")
+        elif framework == "tf" and not is_tf_available():
+            raise RuntimeError("Cannot export model to ONNX using TensorFlow because no TensorFlow package was found.")
+
+    @staticmethod
+    def get_model_class_for_feature(feature: str, framework: str = "pt") -> Type:
+        """
+        Attempts to retrieve an AutoModel class from a feature name.
 
         Args:
-            feature: The feature required.
+            feature (`str`):
+                The feature required.
+            framework (`str`, *optional*, defaults to `"pt"`):
+                The framework to use for the export.
 
         Returns:
             The AutoModel class corresponding to the feature.
         """
         task = FeaturesManager.feature_to_task(feature)
-        if task not in FeaturesManager._TASKS_TO_AUTOMODELS:
+        FeaturesManager._validate_framework_choice(framework)
+        if framework == "pt":
+            task_to_automodel = FeaturesManager._TASKS_TO_AUTOMODELS
+        else:
+            task_to_automodel = FeaturesManager._TASKS_TO_TF_AUTOMODELS
+        if task not in task_to_automodel:
             raise KeyError(
                 f"Unknown task: {feature}. "
                 f"Possible values are {list(FeaturesManager._TASKS_TO_AUTOMODELS.values())}"
             )
-        return FeaturesManager._TASKS_TO_AUTOMODELS[task]
+        return task_to_automodel[task]
 
-    def get_model_from_feature(feature: str, model: str) -> PreTrainedModel:
+    def get_model_from_feature(
+        feature: str, model: str, framework: str = "pt"
+    ) -> Union[PreTrainedModel, TFPreTrainedModel]:
         """
-        Attempt to retrieve a model from a model's name and the feature to be enabled.
+        Attempts to retrieve a model from a model's name and the feature to be enabled.
 
         Args:
-            feature: The feature required.
-            model: The name of the model to export.
+            feature (`str`):
+                The feature required.
+            model (`str`):
+                The name of the model to export.
+            framework (`str`, *optional*, defaults to `"pt"`):
+                The framework to use for the export.
 
         Returns:
             The instance of the model.
 
         """
-        model_class = FeaturesManager.get_model_class_for_feature(feature)
-        return model_class.from_pretrained(model)
+        model_class = FeaturesManager.get_model_class_for_feature(feature, framework)
+        try:
+            model = model_class.from_pretrained(model)
+        except OSError:
+            if framework == "pt":
+                model = model_class.from_pretrained(model, from_tf=True)
+            else:
+                model = model_class.from_pretrained(model, from_pt=True)
+        return model
 
     @staticmethod
-    def check_supported_model_or_raise(model: PreTrainedModel, feature: str = "default") -> Tuple[str, Callable]:
+    def check_supported_model_or_raise(
+        model: Union[PreTrainedModel, TFPreTrainedModel], feature: str = "default"
+    ) -> Tuple[str, Callable]:
         """
         Check whether or not the model has the requested features.
 
