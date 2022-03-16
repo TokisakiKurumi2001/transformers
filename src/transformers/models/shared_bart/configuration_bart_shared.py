@@ -28,7 +28,7 @@ from ...utils import logging
 logger = logging.get_logger(__name__)
 
 BART_SHARED_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "facebook/bart-base": "https://huggingface.co/facebook/bart-base/resolve/main/config.json"
+    "facebook/bart-base": "https://huggingface.co/facebook/bart-base/resolve/main/config.json",
     "facebook/bart-large": "https://huggingface.co/facebook/bart-large/resolve/main/config.json",
     # See all BART models at https://huggingface.co/models?filter=bart
 }
