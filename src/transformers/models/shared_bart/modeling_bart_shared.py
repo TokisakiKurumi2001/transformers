@@ -43,13 +43,13 @@ from ...modeling_outputs import (
 )
 from ...modeling_utils import PreTrainedModel
 from ...utils import logging
-from .configuration_bart import BartConfig
+from .configuration_bart_shared import BartSharedConfig
 
 
 logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "facebook/bart-base"
-_CONFIG_FOR_DOC = "BartConfig"
+_CONFIG_FOR_DOC = "BartSharedConfig"
 _TOKENIZER_FOR_DOC = "BartTokenizer"
 
 # Base model docstring
@@ -280,7 +280,7 @@ class BartAttention(nn.Module):
 
 
 class BartShareEncoderLayer(nn.Module):
-    def __init__(self, config: BartConfig):
+    def __init__(self, config: BartSharedConfig):
         super().__init__()
         self.embed_dim = config.d_model
         self.self_attn = BartAttention(
@@ -348,7 +348,7 @@ class BartShareEncoderLayer(nn.Module):
 
 
 class BartShareDecoderLayer(nn.Module):
-    def __init__(self, config: BartConfig):
+    def __init__(self, config: BartSharedConfig):
         super().__init__()
         self.embed_dim = config.d_model
 
@@ -489,7 +489,7 @@ class BartClassificationHead(nn.Module):
 
 
 class BartSharedPretrainedModel(PreTrainedModel):
-    config_class = BartConfig
+    config_class = BartSharedConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
     _keys_to_ignore_on_load_unexpected = [r"encoder\.version", r"decoder\.version"]
@@ -538,7 +538,7 @@ BART_START_DOCSTRING = r"""
     and behavior.
 
     Parameters:
-        config ([`BartConfig`]):
+        config ([`BartSharedConfig`]):
             Model configuration class with all the parameters of the model. Initializing with a config file does not
             load the weights associated with the model, only the configuration. Check out the
             [`~PreTrainedModel.from_pretrained`] method to load the model weights.
@@ -690,11 +690,11 @@ class BartShareEncoder(BartSharedPretrainedModel):
     [`BartShareEncoderLayer`].
 
     Args:
-        config: BartConfig
+        config: BartSharedConfig
         embed_tokens (nn.Embedding): output embedding
     """
 
-    def __init__(self, config: BartConfig, embed_tokens: Optional[nn.Embedding] = None):
+    def __init__(self, config: BartSharedConfig, embed_tokens: Optional[nn.Embedding] = None):
         super().__init__(config)
 
         self.dropout = config.dropout
@@ -901,11 +901,11 @@ class BartShareDecoder(BartSharedPretrainedModel):
     Transformer decoder consisting of *config.decoder_layers* layers. Each layer is a [`BartShareDecoderLayer`]
 
     Args:
-        config: BartConfig
+        config: BartSharedConfig
         embed_tokens (nn.Embedding): output embedding
     """
 
-    def __init__(self, config: BartConfig, embed_tokens: Optional[nn.Embedding] = None):
+    def __init__(self, config: BartSharedConfig, embed_tokens: Optional[nn.Embedding] = None):
         super().__init__(config)
         self.dropout = config.dropout
         self.layerdrop = config.decoder_layerdrop
@@ -1237,7 +1237,7 @@ class BartShareDecoder(BartSharedPretrainedModel):
     BART_START_DOCSTRING,
 )
 class BartSharedModel(BartSharedPretrainedModel):
-    def __init__(self, config: BartConfig):
+    def __init__(self, config: BartSharedConfig):
         super().__init__(config)
 
         padding_idx, vocab_size = config.pad_token_id, config.vocab_size
@@ -1367,7 +1367,7 @@ class BartSharedForConditionalGeneration(BartSharedPretrainedModel):
     base_model_prefix = "model"
     _keys_to_ignore_on_load_missing = [r"final_logits_bias", r"lm_head\.weight"]
 
-    def __init__(self, config: BartConfig):
+    def __init__(self, config: BartSharedConfig):
         super().__init__(config)
         self.model = BartSharedModel(config)
         self.register_buffer("final_logits_bias", torch.zeros((1, self.model.shared.num_embeddings)))
@@ -1533,7 +1533,7 @@ class BartSharedForConditionalGeneration(BartSharedPretrainedModel):
     BART_START_DOCSTRING,
 )
 class BartSharedForSequenceClassification(BartSharedPretrainedModel):
-    def __init__(self, config: BartConfig, **kwargs):
+    def __init__(self, config: BartSharedConfig, **kwargs):
         super().__init__(config, **kwargs)
         self.model = BartSharedModel(config)
         self.classification_head = BartClassificationHead(
