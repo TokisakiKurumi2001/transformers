@@ -20,6 +20,7 @@ from . import (
     albert,
     auto,
     bart,
+    shared_bart_v2,
     barthez,
     bartpho,
     beit,

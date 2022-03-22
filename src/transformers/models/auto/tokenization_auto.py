@@ -107,6 +107,7 @@ else:
             ("blenderbot-small", ("BlenderbotSmallTokenizer", None)),
             ("blenderbot", ("BlenderbotTokenizer", "BlenderbotTokenizerFast")),
             ("bart", ("BartTokenizer", "BartTokenizerFast")),
+            ("shared_bart_v2", ("BartTokenizer", "BartTokenizerFast")),
             ("longformer", ("LongformerTokenizer", "LongformerTokenizerFast" if is_tokenizers_available() else None)),
             ("roberta", ("RobertaTokenizer", "RobertaTokenizerFast" if is_tokenizers_available() else None)),
             (

@@ -163,6 +163,7 @@ _import_structure = {
         "AutoTokenizer",
     ],
     "models.bart": ["BartConfig", "BartTokenizer"],
+    "models.shared_bart_v2": ["BartSharedV2Config"],
     "models.barthez": [],
     "models.bartpho": [],
     "models.beit": ["BEIT_PRETRAINED_CONFIG_ARCHIVE_MAP", "BeitConfig"],
@@ -709,6 +710,18 @@ if is_torch_available():
             "BartModel",
             "BartPretrainedModel",
             "PretrainedBartModel",
+        ]
+    )
+    _import_structure["models.shared_bart_v2"].extend(
+        [
+            "SHARED_BART_V2_PRETRAINED_MODEL_ARCHIVE_LIST",
+            "BartSharedV2ForCausalLM",
+            "BartSharedV2ForConditionalGeneration",
+            "BartSharedV2ForQuestionAnswering",
+            "BartSharedV2ForSequenceClassification",
+            "BartSharedV2Model",
+            "BartSharedV2PretrainedModel",
+            "PretrainedBartSharedV2Model",
         ]
     )
     _import_structure["models.beit"].extend(
@@ -1736,6 +1749,7 @@ if is_tf_available():
         ]
     )
     _import_structure["models.bart"].extend(["TFBartForConditionalGeneration", "TFBartModel", "TFBartPretrainedModel"])
+    _import_structure["models.shared_bart_v2"].extend(["TFBartSharedV2ForConditionalGeneration", "TFBartSharedV2Model", "TFBartSharedV2PretrainedModel"])
     _import_structure["models.bert"].extend(
         [
             "TF_BERT_PRETRAINED_MODEL_ARCHIVE_LIST",
@@ -2218,6 +2232,17 @@ if is_flax_available():
             "FlaxBartPreTrainedModel",
         ]
     )
+    _import_structure["models.shared_bart_v2"].extend(
+        [
+            "FlaxBartSharedV2DecoderPreTrainedModel",
+            "FlaxBartSharedV2ForCausalLM",
+            "FlaxBartSharedV2ForConditionalGeneration",
+            "FlaxBartSharedV2ForQuestionAnswering",
+            "FlaxBartSharedV2ForSequenceClassification",
+            "FlaxBartSharedV2Model",
+            "FlaxBartSharedV2PreTrainedModel",
+        ]
+    )
 
     _import_structure["models.beit"].extend(
         [
@@ -2497,6 +2522,7 @@ if TYPE_CHECKING:
         AutoTokenizer,
     )
     from .models.bart import BartConfig, BartTokenizer
+    from .models.shared_bart_v2 import BartSharedV2Config
     from .models.beit import BEIT_PRETRAINED_CONFIG_ARCHIVE_MAP, BeitConfig
     from .models.bert import (
         BERT_PRETRAINED_CONFIG_ARCHIVE_MAP,
@@ -2958,6 +2984,16 @@ if TYPE_CHECKING:
             BartModel,
             BartPretrainedModel,
             PretrainedBartModel,
+        )
+        from .models.shared_bart_v2 import (
+            SHARED_BART_V2_PRETRAINED_MODEL_ARCHIVE_LIST,
+            BartSharedV2ForCausalLM,
+            BartSharedV2ForConditionalGeneration,
+            BartSharedV2ForQuestionAnswering,
+            BartSharedV2ForSequenceClassification,
+            BartSharedV2Model,
+            BartSharedV2PretrainedModel,
+            PretrainedBartSharedV2Model,
         )
         from .models.beit import (
             BEIT_PRETRAINED_MODEL_ARCHIVE_LIST,
